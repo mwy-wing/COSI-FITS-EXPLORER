@@ -13,9 +13,10 @@ First public release of a local, read-only viewer for FITS and supported COSI L0
 - `COSI-Explorer-v0.1.0-macos-arm64.dmg`: drag-to-Applications download for macOS 15+ on Apple Silicon, with CFITSIO included.
 - `COSI-Explorer-v0.1.0-macos-arm64.zip`: alternative archive of the same app.
 - `COSI-Explorer-v0.1.0-source.zip`: repository-ready source and release instructions.
-- `SHA256SUMS.txt`: checksums for the ZIP assets.
+- `synthetic-events.fits`: supplemental example containing 1,200 invented events, distributed under the MIT license.
+- `SHA256SUMS.txt`: checksums for the DMG, ZIP assets, and supplemental demo.
 
-Open the DMG, drag the app to Applications, eject the disk image, then open a data file or select your own data folder. No observation data is included.
+Open the DMG, drag the app to Applications, eject the disk image, then open a data file or select your own data folder. The app contains no observation data. To try it, download the supplemental `synthetic-events.fits` asset and open it with **Open file…**. These are invented values, not a physical simulation. The supplemental demo and automated build workflow were added on `main` after the v0.1.0 tag; the app and source ZIP retain the original tagged version.
 
 This initial binary is locally ad-hoc signed, **not Developer ID signed or notarized**; Gatekeeper may block downloaded copies. Build from source or consult Apple's documented handling of unnotarized software. Do not describe this build as notarized.
 

@@ -33,3 +33,12 @@ The custom-tap cask generator produced a Ruby-syntax-valid draft with the real D
 ## README imagery
 
 The README screenshot is rendered from the native app with generated synthetic events and a neutral temporary directory. The image was visually reviewed for legibility and absence of personal paths or observation data. The source packager includes only this reviewed PNG and the original vector banner; local development screenshots remain excluded.
+
+## Public demo and automated build setup — 2026-10-22
+
+- All three local CTest suites passed, including a public-demo test for time/row axes, original row preservation after class filtering, finite energies, and selected-event histogram totals.
+- A fresh build from the updated source ZIP also passed all three suites. Its explicit allowlist includes only the reviewed synthetic FITS example, generator, tests, workflow, and documented public artwork.
+- The generator rejected an existing output file; its SHA-256 remained unchanged.
+- The original v0.1.0 source ZIP matches the existing published tag file-for-file. It is retained for release; the demo is a separate supplemental asset.
+- The release DMG passed hdiutil verification, all four release assets matched the checksum manifest, and a clean extraction of the app ZIP passed strict codesign verification. The signature is ad-hoc, not Developer ID or notarization.
+- GitHub CI builds the macOS app and Linux core/CLI, runs the three suites, and checks demo generation/overwrite protection. CI does not automate the desktop GUI or publish signed binaries.

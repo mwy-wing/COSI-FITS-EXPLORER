@@ -27,3 +27,6 @@ CMakeUserPresets.json
 
 __pycache__/
 *.pyc
+
+# This one reviewed example contains generated values only.
+!/examples/synthetic-events.fits

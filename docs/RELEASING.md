@@ -82,4 +82,8 @@ Update the version in CMakeLists.txt and Info.plist, increase CFBundleVersion, u
 
 The DMG is the primary desktop download: open it, drag the app to Applications, then eject the image. It contains no installer scripts. The image is compressed and read-only. A disk image does not provide a trusted Developer ID signature or notarization by itself.
 
-For a future `brew install --cask` route, publish the final DMG and a custom tap as described in [HOMEBREW.md](HOMEBREW.md). Rebuild the DMG from the stapled app ZIP after notarization, regenerate checksums, and generate the cask from that final DMG. The application repository URL is configured; the custom Homebrew tap and binary release assets still need publication.
+For a future `brew install --cask` route, publish the final DMG and a custom tap as described in [HOMEBREW.md](HOMEBREW.md). Rebuild the DMG from the stapled app ZIP after notarization, regenerate checksums, and generate the cask from that final DMG. The application repository URL is configured; the custom Homebrew tap still needs publication. The v0.1.0 binary assets are available on [GitHub Releases](https://github.com/mwy-wing/COSI-FITS-EXPLORER/releases/tag/v0.1.0).
+
+## Automated checks
+
+The Build and test workflow runs CMake builds and all three CTest suites on macOS 15 and Ubuntu 24.04. The macOS job compiles the native app; it does not automate GUI interactions or certify notarization. The Linux job verifies the reader and CLI. Both jobs compile the public demo generator, validate its output, and verify that it refuses to overwrite an existing file. Signing and release publication remain explicit release steps.

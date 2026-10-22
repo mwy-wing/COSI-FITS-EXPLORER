@@ -113,3 +113,7 @@ COSI Explorer is an independent viewer; no endorsement by NASA or the COSI missi
 ## Homebrew
 
 A custom-tap cask generator is included. A live `brew install --cask` command requires publishing the final DMG to a public release and publishing a tap under your real GitHub account; neither has been published yet. See [docs/HOMEBREW.md](HOMEBREW.md). Homebrew installs the same desktop app and does not replace Apple signing/notarization.
+
+## Try it without mission files
+
+Download the [synthetic demo](https://github.com/mwy-wing/COSI-FITS-EXPLORER/releases/download/v0.1.0/synthetic-events.fits) and open it with **Open file…**. Start with Column values, ENERGY, and Time; switch to Row number or Histogram. These invented values contain no observation data. See [the example notes](../examples/README.md) for its columns and generator.

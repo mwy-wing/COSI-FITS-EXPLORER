@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Public synthetic FITS example and a reproducible generator that refuses overwrites.
+- Automated macOS app/core builds and Linux core/CLI builds with three CTest suites.
+- Direct Mac download and demo links in the README.
+
 ## 0.1.0 — first public release
 
 - Native macOS COSI/FITS and supported L0 packet inspection.
