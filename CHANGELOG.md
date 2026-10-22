@@ -4,7 +4,7 @@
 
 - Public synthetic FITS example and a reproducible generator that refuses overwrites.
 - Automated macOS app/core builds and Linux core/CLI builds with three CTest suites.
-- Direct Mac download and demo links in the README.
+- Direct Mac download and demo links, plus an animation of the native app, in the README.
 
 ## 0.1.0 — first public release
 

@@ -13,9 +13,9 @@
 
 A native macOS app for browsing FITS files, visualizing columns, and exploring COSI events.
 
-![COSI Explorer displaying energy against time, with its data table and plot controls](docs/assets/overview.png)
+![COSI Explorer switching between energy versus time, original row number, and a histogram](docs/assets/demo.gif)
 
-<p align="center"><sub>Native macOS interface · Synthetic demo data</sub></p>
+<p align="center"><sub>Time → Row number → Histogram · Synthetic demo data</sub></p>
 
 ## What you can do
 

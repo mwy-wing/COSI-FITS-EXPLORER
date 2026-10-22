@@ -42,3 +42,7 @@ The README screenshot is rendered from the native app with generated synthetic e
 - The original v0.1.0 source ZIP matches the existing published tag file-for-file. It is retained for release; the demo is a separate supplemental asset.
 - The release DMG passed hdiutil verification, all four release assets matched the checksum manifest, and a clean extraction of the app ZIP passed strict codesign verification. The signature is ad-hoc, not Developer ID or notarization.
 - GitHub CI builds the macOS app and Linux core/CLI, runs the three suites, and checks demo generation/overwrite protection. CI does not automate the desktop GUI or publish signed binaries.
+
+The v0.1.0 release was published on GitHub. All five public asset downloads (DMG, app ZIP, original tagged source ZIP, checksum manifest, and supplemental demo) were downloaded without authentication and matched their local SHA-256 values. The uploaded asset digests also matched.
+
+The README animation contains three native view captures: Time, Row number, and Histogram. The capture harness checked 1,200 values and the expected axis endpoints before saving; the histogram accepted all 1,200 rows. GIF metadata confirms three 1320 × 900 frames at 2.5 seconds each. The source captures were visually reviewed. Only the encoded public GIF is included in the source allowlist.
