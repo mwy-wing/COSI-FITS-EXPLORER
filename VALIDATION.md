@@ -29,3 +29,7 @@ A native first-launch check with no configured data root showed an empty library
 The v0.1.0 compressed read-only DMG passed `hdiutil verify`. It was mounted read-only without opening Finder; the mounted volume contained COSI Explorer.app, an Applications symlink pointing to /Applications, and INSTALL.txt. The mounted app reported version 0.1.0 and passed strict deep local signature verification. The verification mount was ejected afterward. No app installation into /Applications was performed.
 
 The custom-tap cask generator produced a Ruby-syntax-valid draft with the real DMG SHA-256, arm64 requirement, macOS Sequoia (15) minimum, and correct app bundle name. The GitHub owner is an explicit placeholder. No public tap, Homebrew installation, Developer ID signing, or notarization has been performed. The source archive includes the DMG builder, cask generator, and publication instructions; the checksum manifest covers DMG and ZIP assets.
+
+## README imagery
+
+The README screenshot is rendered from the native app with generated synthetic events and a neutral temporary directory. The image was visually reviewed for legibility and absence of personal paths or observation data. The source packager includes only this reviewed PNG and the original vector banner; local development screenshots remain excluded.

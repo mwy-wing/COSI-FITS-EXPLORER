@@ -15,6 +15,8 @@ files = [source / name for name in (
     'README.md', 'CHANGELOG.md', 'CONTRIBUTING.md', 'VALIDATION.md', 'build.sh', 'release.sh')]
 for folder in ('src', 'tests', 'docs', 'scripts'):
     files.extend(path for path in (source / folder).rglob('*') if path.is_file() and path.suffix in ('.cpp', '.hpp', '.mm', '.md', '.sh', '.py'))
+# Include only the reviewed public README artwork and synthetic-data preview.
+files.extend(source / name for name in ('docs/assets/overview.png', 'docs/assets/banner.svg'))
 archive = output / f'COSI-Explorer-v{version}-source.zip'
 with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as bundle:
     for path in sorted(files):
