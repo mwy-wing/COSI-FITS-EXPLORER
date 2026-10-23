@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
-# First public release; prototype versions were never published.
+# Public versioning began at 0.1.0; prototype labels were never published.
 if(CMAKE_HOST_APPLE)
   set(CMAKE_OSX_DEPLOYMENT_TARGET "15.0" CACHE STRING "Minimum supported macOS version")
 endif()
-project(COSIExplorer VERSION 0.1.0 LANGUAGES CXX)
+project(COSIExplorer VERSION 0.1.1 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(PkgConfig REQUIRED)
@@ -32,7 +32,7 @@ if(APPLE)
   set_source_files_properties(resources/COSIExplorer.icns PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
   add_executable(COSIExplorer MACOSX_BUNDLE src/App.mm resources/COSIExplorer.icns)
   target_compile_options(COSIExplorer PRIVATE -fobjc-arc -Wall -Wextra -Wno-unused-parameter)
-  target_link_libraries(COSIExplorer PRIVATE cosi_data "-framework Cocoa")
+  target_link_libraries(COSIExplorer PRIVATE cosi_data "-framework Cocoa" "-framework UniformTypeIdentifiers")
   set_target_properties(COSIExplorer PROPERTIES
     MACOSX_BUNDLE_BUNDLE_NAME "COSI Explorer"
     MACOSX_BUNDLE_GUI_IDENTIFIER "org.local.cosiexplorer"

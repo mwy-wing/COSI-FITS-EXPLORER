@@ -43,13 +43,14 @@ int main(){
         require(ap.rows[0][7]=="9007199254740993"&&ap.rows[2][7]=="9223372036854775807","Exact 64-bit identifier display");
         require(ap.rows[0][6]=="1"&&ap.rows[2][6]=="NULL/NaN","Logical columns and nulls");
         auto image=readImage(*a,2);require(image.width==2&&image.height==2&&image.min==1&&image.max==4&&std::isnan(image.values[2]),"Image pixels/nulls and scale");
-        PlotOptions o;o.x=2;auto p=makePlot(*a,1,o);require(p.values==3&&p.accepted==2,"Only active hits, no padded energies");require(p.xMin==100&&p.xMax==400,"Energy range");require(std::accumulate(p.y.begin(),p.y.end(),0.)==3,"Histogram conserves counts");
+        PlotOptions o;o.x=2;auto p=makePlot(*a,1,o);require(p.values==3&&p.accepted==2,"Only active hits, no padded energies");require(p.xMin==100&&p.xMax==400,"Energy range");require(p.sourceRows.empty()&&p.sourceTimes.empty(),"Aggregate bins must not claim source-row identity");require(std::accumulate(p.y.begin(),p.y.end(),0.)==3,"Histogram conserves counts");
         o.reduction=Reduction::Sum;p=makePlot(*a,1,o);require(p.values==2&&p.xMin==300&&p.xMax==400,"Sum active hits");
         o.mode=Mode::LightCurve;o.reduction=Reduction::Elements;p=makePlot(*a,1,o);require(p.values==2,"Light curve counts events once, not hits");
         o.mode=Mode::Histogram;o.eventClass=0;p=makePlot(*a,1,o);require(p.accepted==1&&p.values==2,"Class filtering");
         o.eventClass=-1;o.timeMin=25;p=makePlot(*a,1,o);require(p.accepted==1&&p.values==1,"Time filtering");
         o.timeMin=NaN;o.valueMin=200;o.valueMax=300;p=makePlot(*a,1,o);require(p.values==1,"Inclusive value gate");
         o.valueMin=500;o.valueMax=100;fails([&]{makePlot(*a,1,o);});
+        o=PlotOptions{};o.x=2;o.timeMin=std::nextafter(10.0,20.0);p=makePlot(*a,1,o);require(p.values==1&&p.settings.find("time=[10.000000000000002,")!=std::string::npos,"Recorded filter precision preserves the applied boundary");
         o=PlotOptions{};o.x=2;o.rowLimit=1;p=makePlot(*a,1,o);require(p.scanned==1&&p.note.find("PARTIAL")!=std::string::npos,"Partial scan must be labeled");
         // Column values are paired with source time or original row numbers, never counts.
         o=PlotOptions{};o.mode=Mode::Series;o.x=1;o.seriesByRow=true;p=makePlot(*a,1,o);
@@ -59,12 +60,14 @@ int main(){
         o.seriesByRow=false;o.valueMin=NaN;p=makePlot(*a,1,o);
         require(p.x==std::vector<double>({10,20,30})&&p.y==std::vector<double>({2,0,1})&&p.xLabel=="TIME [s]","Stored time/value pairs and units");
         o.x=2;p=makePlot(*a,1,o);require(p.x==std::vector<double>({10,10,30})&&p.y==std::vector<double>({100,200,400})&&p.yLabel=="ENERGY [keV]","Each active hit shares its source time");
+        require(p.sourceRows==std::vector<long long>({1,1,3})&&p.sourceTimes==std::vector<double>({10,10,30}),"Expanded hits retain original row/time provenance");
         o.reduction=Reduction::Sum;o.seriesByRow=true;p=makePlot(*a,1,o);require(p.x==std::vector<double>({1,3})&&p.y==std::vector<double>({300,400}),"Sum active Y hits, exclude padded and empty rows");
         o.reduction=Reduction::First;p=makePlot(*a,1,o);require(p.y==std::vector<double>({100,400}),"First active Y hit");
-        o.timeMin=25;p=makePlot(*a,1,o);require(p.x==std::vector<double>({3})&&p.y==std::vector<double>({400}),"Time gate on row-axis series");
+        o.timeMin=25;p=makePlot(*a,1,o);require(p.sourceRows==std::vector<long long>({3})&&p.sourceTimes==std::vector<double>({30}),"Filtered reduced point provenance");require(p.x==std::vector<double>({3})&&p.y==std::vector<double>({400}),"Time gate on row-axis series");
         o=PlotOptions{};o.mode=Mode::Series;o.x=6;o.seriesByRow=true;p=makePlot(*a,1,o);
         require(p.x==std::vector<double>({1,2})&&p.y==std::vector<double>({1,0}),"Null Y omitted, finite zero preserved");
         auto noTime=*a;noTime.hdus[1].columns[0].name="DEVICE_TICKS";o.x=1;p=makePlot(noTime,1,o);require(p.values==3,"Row axis works without a time column");
+        require(p.sourceRows==std::vector<long long>({1,2,3})&&std::isnan(p.sourceTimes[0])&&p.timeLabel=="Time unavailable","Absent time is unavailable, not inferred from row");
         o.seriesByRow=false;fails([&]{makePlot(noTime,1,o);});
         o=PlotOptions{};o.mode=Mode::Series;o.x=findColumn(d->hdus[0],"PHA");p=makePlot(*d,0,o);
         require(p.x==std::vector<double>({123})&&p.y==std::vector<double>({2361}),"Raw GeD time/value pairs");

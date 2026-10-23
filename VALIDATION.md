@@ -50,3 +50,13 @@ The README animation contains three native view captures: Time, Row number, and 
 ## Application logo
 
 The generated RGBA logo was preserved unchanged. Standard/Retina icon derivatives were assembled with macOS iconutil; the ICNS container contains all expected sizes through 1024 pixels. CMake builds and packages the icon in Resources, and the built Info.plist selects it. The local app was rebuilt and all three CTest suites passed. A clean extraction of its ZIP passed strict signature verification. Both PNG and ICNS are in the source allowlist. The published v0.1.0 assets were not replaced.
+
+## v0.1.1 plot tools
+
+Core fixture tests check point-to-source provenance through hit expansion, reductions, value/time filters, and missing time columns. All three CTest suites pass.
+
+`bash tests/check-plot-tools.sh /path/to/COSI-Explorer.app result-directory` requires a logged-in macOS GUI session and uses only the public synthetic FITS example. It dispatches a native mouse-move event to a displayed point, verifies row/time/value readouts, exports linear time and filtered-row plots plus logarithmic/raw and normalized overlays, and verifies histogram readouts. It uses a unique preferences suite, restarts the app to verify file/HDU/controls/viewport/window/panel restoration, and removes its fixture and test preference domain afterward. App-generated notes are checked separately from the original header text.
+
+Exported PNGs were visually reviewed. PDFKit confirmed one page per PDF with searchable plot labels, source filename, units, applied filters, visible range, log display, and overlay normalization. A native bitmap check verifies 2400-pixel PNG width and pale histogram fills. The PDF renderer uses opaque pale gradient stops so PDF shading matches the on-screen chart. These checks do not certify physical interpretation of mission time or calibration.
+
+The final packaged v0.1.1 app passed the synthetic native regression, including an independent expected viewport/window frame on a second launch. The bundled app ZIP was extracted into a clean temporary directory and passed strict signature verification; it reports 0.1.1 and contains the new Dock icon. Figure serialization and file writes were exercised automatically; native Save-panel clicking was not completed because the computer-use session reported that the foreground application had changed. The Save-panel handlers and captured-output/protected-source paths were reviewed in source. Public v0.1.0 release assets were left intact.

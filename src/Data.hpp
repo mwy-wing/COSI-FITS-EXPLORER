@@ -30,7 +30,10 @@ struct PlotOptions {
     long long rowLimit = 2000000;
 };
 struct Plot {
-    std::string title, xLabel, yLabel, note, settings;
+    std::string title, xLabel, yLabel, note, settings, timeLabel;
+    // Point provenance is empty for aggregated histograms/light curves. Rows are 1-based.
+    std::vector<long long> sourceRows;
+    std::vector<double> sourceTimes;
     std::vector<double> x, y;
     double xMin = 0, xMax = 1, yMin = 0, yMax = 1;
     double mean = NaN;

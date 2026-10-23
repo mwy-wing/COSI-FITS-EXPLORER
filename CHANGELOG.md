@@ -1,7 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.1.1 — in development
 
+- Point hover readouts with full-precision plotted values, original rows, and stored time; histogram bin/overlay readouts.
+- PNG and searchable vector PDF figure export with applied filters, units, sources, display range, and normalization.
+- Last file/HDU, plot settings, viewport, and window/panel layout restored on reopening.
+- Viewer-generated notes clearly separated from the original FITS header.
 - Original COSI Explorer logo and a native macOS Dock icon.
 
 - Public synthetic FITS example and a reproducible generator that refuses overwrites.

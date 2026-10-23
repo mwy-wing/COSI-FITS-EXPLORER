@@ -253,8 +253,8 @@ Plot makePlot(const Dataset& d,int hi,const PlotOptions& o) {
     bool series=o.mode==Mode::Series;
     if((o.mode==Mode::LightCurve||(series&&!o.seriesByRow)||std::isfinite(o.timeMin)||std::isfinite(o.timeMax))&&tc<0) throw std::runtime_error("No supported time column in this table; use Row number for X");
     std::unique_ptr<Fits> f;if(d.fits){f=std::make_unique<Fits>(d.path);f->move(h.number);}std::ifstream in;if(!d.fits) in.open(d.path,std::ios::binary);
-    Plot p;
-    auto bound=[](double n){return std::isfinite(n)?formatNumber(n):"unbounded";};
+    Plot p;p.timeLabel=tc>=0?label(h.columns[tc]):"Time unavailable";
+    auto bound=[](double n){if(!std::isfinite(n))return std::string("unbounded");std::ostringstream out;out<<std::setprecision(17)<<n;return out.str();};
     std::string axes=series?"; X="+std::string(o.seriesByRow?"Row number (1-based)":label(h.columns[tc]))+"; Y="+label(h.columns[o.x]):"; X="+h.columns[o.x].name;
     p.settings="HDU="+h.name+axes+"; reduction="+(o.reduction==Reduction::Elements?"all elements":o.reduction==Reduction::First?"first element":"sum row (active hits where declared)")+(series?std::string{}:"; bins="+std::to_string(o.bins))+"; value=["+bound(o.valueMin)+", "+bound(o.valueMax)+"]; time=["+bound(o.timeMin)+", "+bound(o.timeMax)+"]; EVENTCLASS="+(o.eventClass<0?"all":std::to_string(o.eventClass))+"; cleanOnly="+(o.cleanOnly?"true":"false");
     std::vector<double> xs,ys;auto limit=std::min(h.rows,o.rowLimit);bool cap=false;
@@ -279,7 +279,8 @@ Plot makePlot(const Dataset& d,int hi,const PlotOptions& o) {
             if(!std::isfinite(value)){++p.skipped;continue;}
             if((std::isfinite(o.valueMin)&&value<o.valueMin)||(std::isfinite(o.valueMax)&&value>o.valueMax))continue;
             double x=series?(o.seriesByRow?double(r+1):time):o.mode==Mode::LightCurve?time:value;if(!std::isfinite(x)||(o.mode==Mode::Scatter&&!std::isfinite(y))){++p.skipped;continue;}
-            if(xs.size()>=5000000){cap=true;break;}xs.push_back(x);if(series)ys.push_back(value);else if(o.mode==Mode::Scatter)ys.push_back(y);accepted=true;
+            if(xs.size()>=5000000){cap=true;break;}xs.push_back(x);if(series)ys.push_back(value);else if(o.mode==Mode::Scatter)ys.push_back(y);
+            if(series||o.mode==Mode::Scatter){p.sourceRows.push_back(r+1);p.sourceTimes.push_back(time);}accepted=true;
             // A light curve counts rows/events once, even when the gate column contains multiple hits.
             if(o.mode==Mode::LightCurve)break;
         }

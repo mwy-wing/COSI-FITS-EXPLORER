@@ -1,4 +1,5 @@
 #import <Cocoa/Cocoa.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #include "Data.hpp"
 #include <algorithm>
 #include <array>
@@ -130,9 +131,18 @@ static NSTextView* reader() {
 }
 @end
 
+@class PlotCanvas;
+@interface PlotHoverLayer : NSView
+@property(weak) PlotCanvas* canvas;
+@end
+struct PlotTarget {NSPoint point;size_t index;};
 @interface PlotCanvas : NSView {
 @public Plot plot, overlay;Image image;Geometry geometry;
+    std::vector<PlotTarget> _targets;PlotHoverLayer* _hoverLayer;NSInteger _hoverIndex;
 }
+@property BOOL exporting;
+@property(copy) NSString* exportCaption;
+@property CGFloat captionHeight;
 @property NSInteger contentMode;
 @property BOOL logY;
 @property BOOL hasOverlay;
@@ -144,17 +154,28 @@ static NSTextView* reader() {
 @property double dragMax;
 @property(strong) NSTrackingArea* tracking;
 - (void)resetZoom;
+- (NSRect)chartRect;
+- (NSString*)hoverDetailsAtPoint:(NSPoint)point;
+- (void)drawHover;
+- (NSData*)figureDataAsPDF:(BOOL)pdf;
 @end
 @implementation PlotCanvas
+- (instancetype)initWithFrame:(NSRect)frame {
+    if((self=[super initWithFrame:frame])){
+        self.wantsLayer=YES;_hoverLayer=[[PlotHoverLayer alloc]initWithFrame:self.bounds];_hoverLayer.canvas=self;
+        _hoverLayer.autoresizingMask=NSViewWidthSizable|NSViewHeightSizable;_hoverLayer.wantsLayer=YES;
+        [self addSubview:_hoverLayer];_hoverIndex=-1;
+    }return self;
+}
 - (BOOL)isFlipped{return YES;}
-- (void)resetZoom {self.viewMin=plot.xMin;self.viewMax=plot.xMax;self.hover=NSMakePoint(-1,-1);self.needsDisplay=YES;}
-- (NSRect)chartRect {return NSMakeRect(68,68,std::max(20.,self.bounds.size.width-98),std::max(20.,self.bounds.size.height-134));}
+- (void)resetZoom {self.viewMin=plot.xMin;self.viewMax=plot.xMax;self.hover=NSMakePoint(-1,-1);_hoverIndex=-1;_hoverLayer.needsDisplay=YES;self.needsDisplay=YES;}
+- (NSRect)chartRect {return NSMakeRect(68,68,std::max(20.,self.bounds.size.width-98),std::max(20.,self.bounds.size.height-134-(self.exporting?self.captionHeight+24:0)));}
 - (void)updateTrackingAreas {
     [super updateTrackingAreas];if(self.tracking)[self removeTrackingArea:self.tracking];
     self.tracking=[[NSTrackingArea alloc]initWithRect:self.bounds options:NSTrackingMouseMoved|NSTrackingMouseEnteredAndExited|NSTrackingActiveInKeyWindow owner:self userInfo:nil];[self addTrackingArea:self.tracking];
 }
-- (void)mouseMoved:(NSEvent*)e {self.hover=[self convertPoint:e.locationInWindow fromView:nil];self.needsDisplay=YES;}
-- (void)mouseExited:(NSEvent*)e {self.hover=NSMakePoint(-1,-1);self.needsDisplay=YES;}
+- (void)mouseMoved:(NSEvent*)e {self.hover=[self convertPoint:e.locationInWindow fromView:nil];_hoverLayer.needsDisplay=YES;}
+- (void)mouseExited:(NSEvent*)e {self.hover=NSMakePoint(-1,-1);_hoverLayer.needsDisplay=YES;}
 - (void)mouseDown:(NSEvent*)e {if(e.clickCount==2){[self resetZoom];return;}self.dragStart=[self convertPoint:e.locationInWindow fromView:nil];self.dragMin=self.viewMin;self.dragMax=self.viewMax;}
 - (void)mouseDragged:(NSEvent*)e {
     if(self.contentMode!=0)return;NSPoint p=[self convertPoint:e.locationInWindow fromView:nil];double dx=(p.x-self.dragStart.x)/[self chartRect].size.width*(self.dragMax-self.dragMin);
@@ -167,6 +188,7 @@ static NSTextView* reader() {
     double x=self.viewMin+frac*range;self.viewMin=x-frac*next;self.viewMax=self.viewMin+next;self.needsDisplay=YES;
 }
 - (void)drawRect:(NSRect)dirty {
+    _targets.clear();_hoverLayer.needsDisplay=YES;
     [panel() setFill];NSRectFill(self.bounds);
     if(self.contentMode==2){[self drawGeometry];return;}
     if(self.contentMode==1){[self drawImage];return;}
@@ -191,27 +213,81 @@ static NSTextView* reader() {
         CGContextRef context=NSGraphicsContext.currentContext.CGContext;CGContextSetFillColorWithColor(context,accent().CGColor);
         size_t visible=0;for(double x:plot.x)if(x>=xmin&&x<=xmax)++visible;
         size_t stride=std::max<size_t>(1,(visible+49999)/50000),seen=0;
-        for(size_t i=0;i<plot.x.size();++i)if(plot.x[i]>=xmin&&plot.x[i]<=xmax&&seen++%stride==0)
-            CGContextFillRect(context,CGRectMake(px(plot.x[i])-1.25,py(plot.y[i])-1.25,2.5,2.5));
+        for(size_t i=0;i<plot.x.size();++i)if(plot.x[i]>=xmin&&plot.x[i]<=xmax&&seen++%stride==0){
+            NSPoint point=NSMakePoint(px(plot.x[i]),py(plot.y[i]));
+            CGContextFillRect(context,CGRectMake(point.x-1.25,point.y-1.25,2.5,2.5));
+            if(!self.exporting&&point.x>=NSMinX(r)&&point.x<=NSMaxX(r)&&point.y>=NSMinY(r)&&point.y<=NSMaxY(r))_targets.push_back({point,i});
+        }
     }else {double width=(plot.xMax-plot.xMin)/plot.x.size();NSBezierPath* p=[NSBezierPath bezierPath];BOOL first=YES;
         for(size_t i=0;i<plot.x.size();++i){double a=px(plot.x[i]-width/2),b=px(plot.x[i]+width/2),y=py(plot.y[i]);if(first){[p moveToPoint:NSMakePoint(a,NSMaxY(r))];first=NO;}[p lineToPoint:NSMakePoint(a,y)];[p lineToPoint:NSMakePoint(b,y)];}
         [p lineToPoint:NSMakePoint(px(plot.x.back()+width/2),NSMaxY(r))];[p closePath];
-        NSGradient* gradient=[[NSGradient alloc]initWithStartingColor:[accent()colorWithAlphaComponent:.20] endingColor:[accent()colorWithAlphaComponent:.025]];[gradient drawInBezierPath:p angle:90];[accent()setStroke];p.lineWidth=1.8;[p stroke];
+        // Opaque pale stops keep PDF shadings consistent with the on-screen white chart.
+        NSGradient* gradient=[[NSGradient alloc]initWithStartingColor:[accent()blendedColorWithFraction:.80 ofColor:panel()] endingColor:[accent()blendedColorWithFraction:.975 ofColor:panel()]];[gradient drawInBezierPath:p angle:90];[accent()setStroke];p.lineWidth=1.8;[p stroke];
     }
     if(self.hasOverlay&&!overlay.x.empty()){
         double width=(overlay.xMax-overlay.xMin)/overlay.x.size();NSBezierPath* p=[NSBezierPath bezierPath];BOOL first=YES;
         for(size_t i=0;i<overlay.x.size();++i){double a=px(overlay.x[i]-width/2),b=px(overlay.x[i]+width/2),y=py(overlay.y[i]);if(first){[p moveToPoint:NSMakePoint(a,y)];first=NO;}else[p lineToPoint:NSMakePoint(a,y)];[p lineToPoint:NSMakePoint(b,y)];}
         [RGB(219,143,42)setStroke];p.lineWidth=1.8;[p stroke];
     }
-    if(NSPointInRect(self.hover,r)){line(NSMakePoint(self.hover.x,r.origin.y),NSMakePoint(self.hover.x,NSMaxY(r)),[ink()colorWithAlphaComponent:.4]);}
     [NSGraphicsContext restoreGraphicsState];
     text(S(plot.xLabel),NSMakeRect(r.origin.x,NSMaxY(r)+33,r.size.width,18),11,muted());
     text(S(plot.yLabel+(useLog?" · log10(1+y)":"")),NSMakeRect(22,44,r.size.width,16),10,muted());
-    NSString* hint=@"Scroll: zoom X   ·   Drag: pan   ·   Double-click: reset";
-    if(NSPointInRect(self.hover,r)){double x=xmin+(self.hover.x-r.origin.x)/r.size.width*(xmax-xmin);hint=[NSString stringWithFormat:@"X = %@",S(formatNumber(x))];}
-    if(plot.scatter&&plot.x.size()>50000)hint=[hint stringByAppendingString:@"   ·   display thinned to ≤50k points"];
-    text(hint,NSMakeRect(self.bounds.size.width-365,self.bounds.size.height-20,345,15),9,muted());
+    if(self.exporting){
+        NSMutableParagraphStyle* style=[NSMutableParagraphStyle new];style.lineBreakMode=NSLineBreakByWordWrapping;style.lineSpacing=3;
+        line(NSMakePoint(22,self.bounds.size.height-self.captionHeight-16),NSMakePoint(self.bounds.size.width-22,self.bounds.size.height-self.captionHeight-16),edge());
+        [self.exportCaption drawInRect:NSMakeRect(22,self.bounds.size.height-self.captionHeight-8,self.bounds.size.width-44,self.captionHeight) withAttributes:@{NSFontAttributeName:[NSFont systemFontOfSize:11],NSForegroundColorAttributeName:ink(),NSParagraphStyleAttributeName:style}];
+    }else{
+        NSString* hint=@"Hover: inspect values   ·   Scroll: zoom X   ·   Drag: pan   ·   Double-click: reset";
+        if(plot.scatter&&plot.x.size()>50000)hint=@"Hover: displayed points   ·   display thinned to ≤50k points   ·   Scroll: zoom X";
+        text(hint,NSMakeRect(22,self.bounds.size.height-20,self.bounds.size.width-44,15),9,muted());
+    }
 }
+- (NSString*)hoverDetailsAtPoint:(NSPoint)point {
+    _hoverIndex=-1;if(self.contentMode!=0||plot.x.empty()||self.exporting||!NSPointInRect(point,[self chartRect]))return nil;
+    auto exact=[](double value){return std::isfinite(value)?[NSString stringWithFormat:@"%.17g",value]:@"Unavailable";};
+    if(plot.scatter){
+        double best=12*12;for(const auto& candidate:_targets){double dx=candidate.point.x-point.x,dy=candidate.point.y-point.y,d=dx*dx+dy*dy;if(d<best){best=d;_hoverIndex=candidate.index;}}
+        if(_hoverIndex<0)return nil;size_t i=_hoverIndex;
+        NSString* details=[NSString stringWithFormat:@"%@: %@\n%@: %@",S(plot.xLabel),exact(plot.x[i]),S(plot.yLabel),exact(plot.y[i])];
+        if(i<plot.sourceRows.size())details=[details stringByAppendingFormat:@"\nOriginal row: %lld",plot.sourceRows[i]];
+        if(i<plot.sourceTimes.size()&&plot.xLabel!=plot.timeLabel)details=[details stringByAppendingFormat:@"\n%@: %@",S(plot.timeLabel),exact(plot.sourceTimes[i])];
+        return details;
+    }
+    NSRect r=[self chartRect];double lo=self.viewMin,hi=self.viewMax;if(hi<=lo){lo=plot.xMin;hi=plot.xMax;}
+    double value=lo+(point.x-r.origin.x)/r.size.width*(hi-lo),width=(plot.xMax-plot.xMin)/plot.x.size();
+    if(value<plot.xMin||value>plot.xMax||width<=0)return nil;
+    size_t bin=std::min(plot.x.size()-1,size_t((value-plot.xMin)/width));_hoverIndex=bin;
+    NSString* details=[NSString stringWithFormat:@"%@: %@\nBin: [%@, %@%@\n%@: %@",S(plot.xLabel),exact(plot.x[bin]),exact(plot.xMin+bin*width),exact(plot.xMin+(bin+1)*width),bin+1==plot.x.size()?@"]":@")",S(plot.yLabel),exact(plot.y[bin])];
+    if(self.hasOverlay&&bin<overlay.y.size())details=[details stringByAppendingFormat:@"\nB %@: %@",S(overlay.yLabel),exact(overlay.y[bin])];
+    return details;
+}
+- (void)drawHover {
+    NSString* details=[self hoverDetailsAtPoint:self.hover];if(!details.length)return;
+    NSRect r=[self chartRect];NSPoint selected=self.hover;
+    if(plot.scatter){for(const auto& target:_targets)if(target.index==size_t(_hoverIndex)){selected=target.point;break;}}
+    else {double lo=self.viewMin,hi=self.viewMax;if(hi<=lo){lo=plot.xMin;hi=plot.xMax;}selected.x=r.origin.x+(plot.x[_hoverIndex]-lo)/(hi-lo)*r.size.width;}
+    line(NSMakePoint(selected.x,r.origin.y),NSMakePoint(selected.x,NSMaxY(r)),[accent()colorWithAlphaComponent:.35]);
+    if(plot.scatter){[accent()setStroke];NSBezierPath* ring=[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(selected.x-5,selected.y-5,10,10)];ring.lineWidth=1.5;[ring stroke];}
+    NSMutableParagraphStyle* style=[NSMutableParagraphStyle new];style.lineBreakMode=NSLineBreakByWordWrapping;style.lineSpacing=3;
+    NSDictionary* attrs=@{NSFontAttributeName:[NSFont monospacedSystemFontOfSize:10 weight:NSFontWeightRegular],NSForegroundColorAttributeName:ink(),NSParagraphStyleAttributeName:style};
+    CGFloat width=std::min(390.,self.bounds.size.width-48),height=std::ceil([details boundingRectWithSize:NSMakeSize(width-24,1000) options:NSStringDrawingUsesLineFragmentOrigin attributes:attrs].size.height)+22;
+    NSRect box=NSMakeRect(std::clamp(self.hover.x+15,CGFloat(12),self.bounds.size.width-width-12),std::clamp(self.hover.y+15,CGFloat(44),self.bounds.size.height-height-24),width,height);
+    NSBezierPath* shape=[NSBezierPath bezierPathWithRoundedRect:box xRadius:8 yRadius:8];[[panel()colorWithAlphaComponent:.98]setFill];[shape fill];[edge()setStroke];[shape stroke];
+    [details drawInRect:NSInsetRect(box,12,10) withAttributes:attrs];
+}
+- (NSData*)figureDataAsPDF:(BOOL)pdf {
+    _hoverLayer.hidden=YES;self.wantsLayer=NO;
+    NSData* data=[self dataWithPDFInsideRect:self.bounds];if(pdf)return data;
+    CGDataProviderRef provider=CGDataProviderCreateWithCFData((__bridge CFDataRef)data);CGPDFDocumentRef document=CGPDFDocumentCreateWithProvider(provider);CGDataProviderRelease(provider);
+    if(!document)return nil;CGPDFPageRef page=CGPDFDocumentGetPage(document,1);if(!page){CGPDFDocumentRelease(document);return nil;}
+    size_t width=std::ceil(self.bounds.size.width*2),height=std::ceil(self.bounds.size.height*2);
+    CGColorSpaceRef color=CGColorSpaceCreateDeviceRGB();CGContextRef context=CGBitmapContextCreate(nullptr,width,height,8,width*4,color,kCGImageAlphaPremultipliedLast);CGColorSpaceRelease(color);
+    if(!context){CGPDFDocumentRelease(document);return nil;}
+    CGContextSetRGBFillColor(context,1,1,1,1);CGContextFillRect(context,CGRectMake(0,0,width,height));CGContextScaleCTM(context,2,2);CGContextDrawPDFPage(context,page);
+    CGImageRef rendered=CGBitmapContextCreateImage(context);NSBitmapImageRep* rep=[[NSBitmapImageRep alloc]initWithCGImage:rendered];
+    NSData* png=[rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];CGImageRelease(rendered);CGContextRelease(context);CGPDFDocumentRelease(document);return png;
+}
+
 - (void)drawImage {
     text(@"FITS image · first plane",NSMakeRect(20,12,500,24),14,ink());
     if(image.values.empty()){text(@"This HDU has no image pixels.",NSMakeRect(30,70,600,30),13,muted());return;}
@@ -250,6 +326,13 @@ static NSTextView* reader() {
 }
 @end
 
+@implementation PlotHoverLayer
+- (BOOL)isFlipped{return YES;}
+- (BOOL)isOpaque{return NO;}
+- (NSView*)hitTest:(NSPoint)point{return nil;}
+- (void)drawRect:(NSRect)dirty {[self.canvas drawHover];}
+@end
+
 struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
 @interface Explorer : NSObject <NSApplicationDelegate,NSTableViewDataSource,NSTableViewDelegate,NSTextFieldDelegate,NSSearchFieldDelegate,NSWindowDelegate,NSToolbarDelegate> {
     std::vector<FileEntry> _files;std::vector<size_t> _visible;std::shared_ptr<Dataset> _data;Page _page;
@@ -264,7 +347,7 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     NSButton *_rootButton,*_openButton,*_plotButton,*_log,*_clean,*_previous,*_next,*_go,*_export;
     PlotCanvas* _canvas;NSProgressIndicator* _spinner;
     NSString* _smokeDir;NSInteger _smokeStep,_smokeTicks;
-    BOOL _columnTest,_smokePrepared;NSInteger _columnStep,_columnStarted;Plot _expectedColumnPlot;
+    BOOL _columnTest,_smokePrepared,_plotToolsTest,_restoredToolsRun;NSDictionary* _toolsWorkspace;NSString* _preferencesSuite;NSInteger _columnStep,_columnStarted;Plot _expectedColumnPlot;
     std::shared_ptr<Dataset> _overlayData;std::shared_ptr<Comparison> _comparison;TraceResult _trace;
     NSButton *_overlayButton,*_clearOverlay,*_normalize,*_traceButton,*_chooseL0,*_openStage;
     NSPopUpButton *_overlayHDU,*_traceStage;
@@ -278,7 +361,8 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     NSTextField *_eventTitle,*_eventCaption,*_libraryTitle,*_filesHeading,*_traceDetailsHeading;
     NSImageView *_brandGlyph,*_fileGlyph;
     TraceCards* _traceCards;NSScrollView* _traceCardsScroll;
-    BOOL _sidebarHidden,_inspectorHidden,_syncingCatalog;
+    BOOL _sidebarHidden,_inspectorHidden,_syncingCatalog,_restoreEnabled,_restoreViewport,_hasAppliedPlot;
+    NSUserDefaults* _preferences;NSDictionary* _pendingWorkspace;double _restoredMin,_restoredMax;
 }
 - (void)layout;
 - (void)openPath:(NSString*)path;
@@ -288,6 +372,10 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];NSApp.appearance=[NSAppearance appearanceNamed:NSAppearanceNameAqua];
     _selectedRow=-1;_pendingOpenRow=-1;_root=[[NSUserDefaults standardUserDefaults]stringForKey:@"DataRoot"]?:@"";
     NSArray* launchArguments=NSProcessInfo.processInfo.arguments;
+    _preferences=NSUserDefaults.standardUserDefaults;
+    for(NSUInteger i=1;i+1<launchArguments.count;++i)if([launchArguments[i]isEqualToString:@"--preferences-suite"]){_preferencesSuite=launchArguments[i+1];_preferences=[[NSUserDefaults alloc]initWithSuiteName:_preferencesSuite];}
+    _restoreEnabled=![launchArguments containsObject:@"--no-restore"]&&![launchArguments containsObject:@"--smoke-dir"]&&![launchArguments containsObject:@"--column-test-dir"]&&(![launchArguments containsObject:@"--plot-tools-test-dir"]||_preferencesSuite.length);
+    _sidebarHidden=_restoreEnabled&&[_preferences boolForKey:@"SidebarHiddenV1"];_inspectorHidden=_restoreEnabled&&[_preferences boolForKey:@"InspectorHiddenV1"];
     for(NSUInteger i=1;i+1<launchArguments.count;++i)if([launchArguments[i]isEqualToString:@"--data-root"])_root=launchArguments[i+1];
     _window=[[NSWindow alloc]initWithContentRect:NSMakeRect(0,0,1480,920) styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskMiniaturizable|NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];
     _window.title=@"COSI Explorer";_window.subtitle=@"Mission data workspace";_window.minSize=NSMakeSize(1150,780);_window.delegate=self;_window.backgroundColor=bg();_window.toolbarStyle=NSWindowToolbarStyleUnifiedCompact;_window.titlebarAppearsTransparent=YES;
@@ -312,7 +400,7 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     _seriesAxis.toolTip=@"Time uses the stored time column. Row number is the original 1-based table row, preserved after filters.";
     _x.toolTip=@"Column values: Y values. Histogram: values to bin. Event counts: value gate. Column comparison: X values.";
     _reduce.toolTip=@"Hit arrays are clipped to NUMHIT/NUMSTRIPHIT before reduction. Sum ENERGY to plot total deposited energy per event.";
-    _bins=field(@"Bins");_bins.stringValue=@"128";_plotButton=button(@"Update plot",self,@selector(updatePlot:));_export=button(@"Export plot CSV…",self,@selector(exportPlot:));
+    _bins=field(@"Bins");_bins.stringValue=@"128";_plotButton=button(@"Update plot",self,@selector(updatePlot:));_export=button(@"Export plot…",self,@selector(chooseExport:));
     _log=[NSButton checkboxWithTitle:@"Log Y" target:self action:@selector(toggleLog:)];
     _filterLabel=label(@"VALUE / TIME FILTERS",9,muted());_min=field(@"Value min");_max=field(@"Value max");_tmin=field(@"Time min");_tmax=field(@"Time max");
     _overlayButton=button(@"Overlay file…",self,@selector(chooseOverlay:));_overlayHDU=[self popup:@[@"Comparison HDU"] action:@selector(overlayHDUChanged:)];_overlayHDU.enabled=NO;
@@ -333,13 +421,18 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     for(NSView* v in @[_overlayButton,_overlayHDU,_normalize,_clearOverlay,_overlayLabel,_traceScroll,_traceButton,_chooseL0,_traceStage,_openStage,_traceLabel])[_surface addSubview:v];
     [self buildWorkspace];
     [self changeTab:nil];
-    [self buildMenu];[self layout];_window.initialFirstResponder=_eventTable;[_window center];[_window makeKeyAndOrderFront:nil];[NSApp activateIgnoringOtherApps:YES];
+    [self buildMenu];[self layout];_window.initialFirstResponder=_eventTable;[_window center];[self restoreWindowFrame];[_window makeKeyAndOrderFront:nil];[NSApp activateIgnoringOtherApps:YES];
     [self scanRoot];
     NSString* startup=nil;NSArray* args=NSProcessInfo.processInfo.arguments;
     for(NSUInteger i=1;i+1<args.count;++i)if([args[i]isEqualToString:@"--open"])startup=args[i+1];
     for(NSUInteger i=1;i+1<args.count;++i)if([args[i]isEqualToString:@"--smoke-dir"])_smokeDir=args[i+1];
     for(NSUInteger i=1;i+1<args.count;++i)if([args[i]isEqualToString:@"--column-test-dir"]){_smokeDir=args[i+1];_columnTest=YES;}
-    if(!startup&&_smokeDir){NSString* sample=[_root stringByAppendingPathComponent:@"26/10/06/v1/L2/cs20260630ged_00_l2.fits"];if([[NSFileManager defaultManager]fileExistsAtPath:sample])startup=sample;}
+    for(NSUInteger i=1;i+1<args.count;++i)if([args[i]isEqualToString:@"--plot-tools-test-dir"]){_smokeDir=args[i+1];_plotToolsTest=YES;_restoredToolsRun=[args containsObject:@"--check-restored-workspace"];}
+    if(!startup&&_smokeDir&&!_plotToolsTest){NSString* sample=[_root stringByAppendingPathComponent:@"26/10/06/v1/L2/cs20260630ged_00_l2.fits"];if([[NSFileManager defaultManager]fileExistsAtPath:sample])startup=sample;}
+    if(!startup&&_restoreEnabled){
+        id stored=[_preferences objectForKey:@"WorkspaceV1"];
+        if([stored isKindOfClass:NSDictionary.class]&&[stored[@"path"]isKindOfClass:NSString.class]&&[[NSFileManager defaultManager]fileExistsAtPath:stored[@"path"]]){_pendingWorkspace=stored;startup=stored[@"path"];}
+    }
     if(startup)[self openPath:startup];
     if(_smokeDir){[[NSFileManager defaultManager]createDirectoryAtPath:_smokeDir withIntermediateDirectories:YES attributes:nil error:nil];[self smokeTick];}
 }
@@ -386,12 +479,12 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
 - (NSArray<NSToolbarItemIdentifier>*)toolbarAllowedItemIdentifiers:(NSToolbar*)toolbar {return [self toolbarDefaultItemIdentifiers:toolbar];}
 - (NSToolbarItem*)toolbar:(NSToolbar*)toolbar itemForItemIdentifier:(NSToolbarItemIdentifier)identifier willBeInsertedIntoToolbar:(BOOL)flag {
     NSDictionary* symbols=@{@"sidebar":@"sidebar.left",@"open":@"folder.badge.plus",@"compare":@"square.on.square",@"export":@"square.and.arrow.up",@"inspector":@"sidebar.right"};
-    NSDictionary* titles=@{@"sidebar":@"Toggle library",@"open":@"Open data file",@"compare":@"Compare spectra",@"export":@"Export plot CSV",@"inspector":@"Toggle inspector"};
-    NSDictionary* actions=@{@"sidebar":NSStringFromSelector(@selector(toggleSidebar:)),@"open":NSStringFromSelector(@selector(chooseFile:)),@"compare":NSStringFromSelector(@selector(chooseOverlay:)),@"export":NSStringFromSelector(@selector(exportPlot:)),@"inspector":NSStringFromSelector(@selector(toggleInspector:))};
+    NSDictionary* titles=@{@"sidebar":@"Toggle library",@"open":@"Open data file",@"compare":@"Compare spectra",@"export":@"Export plot",@"inspector":@"Toggle inspector"};
+    NSDictionary* actions=@{@"sidebar":NSStringFromSelector(@selector(toggleSidebar:)),@"open":NSStringFromSelector(@selector(chooseFile:)),@"compare":NSStringFromSelector(@selector(chooseOverlay:)),@"export":NSStringFromSelector(@selector(chooseExport:)),@"inspector":NSStringFromSelector(@selector(toggleInspector:))};
     if(!symbols[identifier])return nil;NSToolbarItem* item=[[NSToolbarItem alloc]initWithItemIdentifier:identifier];item.label=titles[identifier];item.toolTip=titles[identifier];item.image=[NSImage imageWithSystemSymbolName:symbols[identifier] accessibilityDescription:titles[identifier]];item.target=self;item.action=NSSelectorFromString(actions[identifier]);return item;
 }
-- (void)toggleSidebar:(id)sender {_sidebarHidden=!_sidebarHidden;[self layout];}
-- (void)toggleInspector:(id)sender {_inspectorHidden=!_inspectorHidden;[self inspectorChanged:nil];[self layout];}
+- (void)toggleSidebar:(id)sender {_sidebarHidden=!_sidebarHidden;[self layout];[self saveWindowLayout];}
+- (void)toggleInspector:(id)sender {_inspectorHidden=!_inspectorHidden;[self inspectorChanged:nil];[self layout];[self saveWindowLayout];}
 - (void)buildMenu {
     NSMenu* menu=[NSMenu new];NSMenuItem* app=[NSMenuItem new];[menu addItem:app];NSMenu* appMenu=[NSMenu new];app.submenu=appMenu;
     [appMenu addItemWithTitle:@"About COSI Explorer" action:@selector(orderFrontStandardAboutPanel:) keyEquivalent:@""];
@@ -401,6 +494,8 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     NSMenuItem* folder=[fm addItemWithTitle:@"Choose Data Folder…" action:@selector(chooseRoot:) keyEquivalent:@"O"];folder.target=self;
     [fm addItem:NSMenuItem.separatorItem];NSMenuItem* compare=[fm addItemWithTitle:@"Compare Spectra…" action:@selector(chooseOverlay:) keyEquivalent:@"C"];compare.target=self;
     NSMenuItem* exportItem=[fm addItemWithTitle:@"Export Plot CSV…" action:@selector(exportPlot:) keyEquivalent:@"E"];exportItem.target=self;
+    NSMenuItem* png=[fm addItemWithTitle:@"Export Plot PNG…" action:@selector(exportPNG:) keyEquivalent:@""];png.target=self;
+    NSMenuItem* pdf=[fm addItemWithTitle:@"Export Plot PDF…" action:@selector(exportPDF:) keyEquivalent:@""];pdf.target=self;
     NSMenuItem* edit=[NSMenuItem new];edit.title=@"Edit";[menu addItem:edit];NSMenu* em=[[NSMenu alloc]initWithTitle:@"Edit"];edit.submenu=em;
     [em addItemWithTitle:@"Copy" action:@selector(copy:) keyEquivalent:@"c"];[em addItemWithTitle:@"Paste" action:@selector(paste:) keyEquivalent:@"v"];[em addItemWithTitle:@"Select All" action:@selector(selectAll:) keyEquivalent:@"a"];
     NSMenuItem* viewItem=[NSMenuItem new];viewItem.title=@"View";[menu addItem:viewItem];NSMenu* vm=[[NSMenu alloc]initWithTitle:@"View"];viewItem.submenu=vm;
@@ -491,7 +586,7 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     _status.stringValue=!busy&&_data&&[message isEqualToString:S(_data->notes)]&&![message containsString:@"WARNING"]?@"Read only  ·  Original units and timestamps":message;
     if(busy)[_spinner startAnimation:nil];else[_spinner stopAnimation:nil];
 }
-- (void)showError:(NSString*)message {NSAlert* a=[NSAlert new];a.messageText=@"Unable to complete this operation";a.informativeText=message;[a beginSheetModalForWindow:_window completionHandler:nil];[self setBusy:NO message:message];}
+- (void)showError:(NSString*)message {if(_smokeDir){[[@"FAIL: " stringByAppendingString:message]writeToFile:[_smokeDir stringByAppendingPathComponent:@"ui-result.txt"] atomically:YES encoding:NSUTF8StringEncoding error:nil];[NSApp terminate:nil];return;}NSAlert* a=[NSAlert new];a.messageText=@"Unable to complete this operation";a.informativeText=message;[a beginSheetModalForWindow:_window completionHandler:nil];[self setBusy:NO message:message];}
 - (void)scanRoot {
     if(!_root.length){_files.clear();[self filterFiles:nil];_catalogStatus.stringValue=@"Choose a data folder, or open a file.";return;}
     NSString* root=[_root copy];_catalogStatus.stringValue=@"Indexing data files…";
@@ -515,6 +610,7 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
 - (void)chooseFile:(id)sender {NSOpenPanel* p=[NSOpenPanel openPanel];if(_root.length)p.directoryURL=[NSURL fileURLWithPath:_root];[p beginSheetModalForWindow:_window completionHandler:^(NSModalResponse r){if(r==NSModalResponseOK)[self openPath:p.URL.path];}];}
 - (void)openSelectedFile:(id)sender {NSInteger row=_fileTable.selectedRow;if(row>=0&&row<(NSInteger)_visible.size())[self openPath:S(_files[_visible[row]].path)];}
 - (void)openPath:(NSString*)path {
+    if(_pendingWorkspace&&![_pendingWorkspace[@"path"]isEqualToString:path])_pendingWorkspace=nil;
     BOOL dir=NO;if([[NSFileManager defaultManager]fileExistsAtPath:path isDirectory:&dir]&&dir){_root=path;_rootLabel.stringValue=path;[self scanRoot];return;}
     NSUInteger token=++_openToken;++_plotToken;++_pageToken;++_traceToken;++_overlayLoadToken;_data.reset();_page=Page{};_selectedRow=-1;_traceL0Path=nil;
     _trace=TraceResult{};_traceView.string=@"Select an event to trace.";[_traceStage removeAllItems];_openStage.enabled=NO;
@@ -529,12 +625,14 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
         NSString* error=S(err);dispatch_async(dispatch_get_main_queue(),^{if(token!=self->_openToken)return;if(!data){[self showError:error];return;}
             self->_data=data;self->_hdu=0;self->_selectedRow=-1;[self->_hduChoice removeAllItems];
             for(size_t i=0;i<data->hdus.size();++i){const auto& h=data->hdus[i];NSString* title=[NSString stringWithFormat:@"%zu · %@%@",i+1,S(h.name),h.columns.empty()?@"":[NSString stringWithFormat:@" · %lld rows",h.rows]];[self->_hduChoice addItemWithTitle:title];if(!h.columns.empty()&&self->_hdu==0)self->_hdu=int(i);}
+            if(self->_pendingWorkspace){NSInteger hi=[self->_pendingWorkspace[@"hdu"]integerValue];
+                if(hi>=0&&hi<(NSInteger)data->hdus.size()&&[self->_pendingWorkspace[@"hduName"]isEqualToString:S(data->hdus[hi].name)])self->_hdu=int(hi);else self->_pendingWorkspace=nil;}
             [self->_hduChoice selectItemAtIndex:self->_hdu];self->_tabs.selectedSegment=0;[self changeHDU:nil];[self syncCatalogSelection];
         });
     });
 }
 - (void)changeHDU:(id)sender {
-    if(!_data)return;_hdu=int(_hduChoice.indexOfSelectedItem);++_plotToken;++_pageToken;++_traceToken;++_overlayLoadToken;const auto& h=_data->hdus[_hdu];
+    if(!_data)return;_hasAppliedPlot=NO;_hdu=int(_hduChoice.indexOfSelectedItem);++_plotToken;++_pageToken;++_traceToken;++_overlayLoadToken;const auto& h=_data->hdus[_hdu];
     _overlayData.reset();_comparison.reset();_canvas.hasOverlay=NO;_overlayLabel.stringValue=@"";[_overlayHDU removeAllItems];[_overlayHDU addItemWithTitle:@"Comparison HDU"];_overlayHDU.enabled=NO;_clearOverlay.enabled=NO;_overlayButton.enabled=YES;
     _trace=TraceResult{};_traceView.string=@"Select an event to trace.";[_traceStage removeAllItems];_openStage.enabled=NO;
     _traceCards->result=TraceResult{};_traceCards.needsDisplay=YES;_inspectorMode.selectedSegment=0;
@@ -542,7 +640,7 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     _metrics.rowLabel=!_data->fits?@"Packets":findColumn(h,"EVENTID")>=0?@"Events":@"Rows";
     _eventTitle.stringValue=!_data->fits?@"Packet table":findColumn(h,"EVENTID")>=0?@"Event table":@"Data table";
     _summary.stringValue=[NSString stringWithFormat:@"%@   •   %@   •   %lld rows   •   %zu columns   •   %.2f MB",S(_data->kind),S(h.name),h.rows,h.columns.size(),_data->bytes/1000000.];
-    _header.string=S(h.header+"\n"+_data->notes);_detail.string=@"Select a row to inspect every column, including complete hit arrays.";
+    _header.string=S(h.header+"\n\n────────────────────\nViewer notes (generated by COSI Explorer; not part of the file header)\n────────────────────\n"+_data->notes);_detail.string=@"Select a row to inspect every column, including complete hit arrays.";
     _selectedRow=-1;_page=Page{};[_eventTable deselectAll:nil];[_eventTable reloadData];
     for(NSTableColumn* c in [_eventTable.tableColumns copy])[_eventTable removeTableColumn:c];
     NSTableColumn* row=[[NSTableColumn alloc]initWithIdentifier:@"row"];row.title=@"Row";row.width=65;[_eventTable addTableColumn:row];
@@ -560,13 +658,14 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     _clean.state=NSControlStateValueOff;_clean.enabled=findColumn(h,"QUALITY_FLAG")>=0||findColumn(h,"BAD_FLAG")>=0;
     for(NSTextField* f in @[_min,_max,_tmin,_tmax])f.stringValue=@"";_log.state=NSControlStateValueOff;_canvas.logY=NO;
     _canvas->plot=Plot{};_canvas->geometry=Geometry{};_canvas->image=Image{};_canvas.needsDisplay=YES;
+    if(_pendingWorkspace){[self restoreWorkspaceControls:_pendingWorkspace];_pendingWorkspace=nil;}
     [self changeTab:nil];
     if(!h.columns.empty()){long long start=0;if([_pendingOpenPath isEqualToString:S(_data->path)]&&_pendingOpenRow>=0){start=_pendingOpenRow;_pendingOpenPath=nil;_pendingOpenRow=-1;}[self loadPage:start];[self updatePlot:nil];}
     else if(!h.axes.empty()){
         [self setBusy:YES message:@"Reading image plane…"];auto data=_data;int hi=_hdu;NSUInteger token=++_plotToken;
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{Image image;std::string err;try{image=readImage(*data,hi);}catch(const std::exception& e){err=e.what();}NSString* error=S(err);
-            dispatch_async(dispatch_get_main_queue(),^{if(token!=self->_plotToken)return;self->_canvas->image=std::move(image);self->_canvas.contentMode=1;self->_canvas.needsDisplay=YES;[self setBusy:NO message:error.length?error:S(data->notes)];});});
-    }else [self setBusy:NO message:@"Primary HDU has no pixels. Choose a table extension or inspect Header."];
+            dispatch_async(dispatch_get_main_queue(),^{if(token!=self->_plotToken)return;self->_canvas->image=std::move(image);self->_canvas.contentMode=1;self->_canvas.needsDisplay=YES;[self setBusy:NO message:error.length?error:S(data->notes)];if(!error.length)[self rememberWorkspace];});});
+    }else {[self setBusy:NO message:@"Primary HDU has no pixels. Choose a table extension or inspect Header."];[self rememberWorkspace];}
 }
 - (void)modeChanged:(id)sender {
     _y.enabled=_mode.indexOfSelectedItem==2;[self layout];
@@ -595,15 +694,15 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
         auto bins=(o.mode==Mode::Series||o.mode==Mode::Scatter)?128:[self optionalNumber:_bins];if(!std::isfinite(bins)||bins<8||bins>4096||std::floor(bins)!=bins)throw std::runtime_error("Bins must be an integer from 8 to 4096");o.bins=int(bins);
         o.valueMin=[self optionalNumber:_min];o.valueMax=[self optionalNumber:_max];o.timeMin=[self optionalNumber:_tmin];o.timeMax=[self optionalNumber:_tmax];o.eventClass=_class.enabled?int(_class.indexOfSelectedItem)-1:-1;o.cleanOnly=_clean.enabled&&_clean.state==NSControlStateValueOn;
     }catch(const std::exception& e){[self showError:S(e.what())];return;}
-    _lastOptions=o;NSUInteger token=++_plotToken;auto data=_data,other=_overlayData;int hi=_hdu,bh=other?int(_overlayHDU.selectedItem.tag):-1;BOOL normalized=_normalize.state==NSControlStateValueOn;
+    NSUInteger token=++_plotToken;BOOL restoreViewport=_restoreViewport;_restoreViewport=NO;double restoredMin=_restoredMin,restoredMax=_restoredMax;auto data=_data,other=_overlayData;int hi=_hdu,bh=other?int(_overlayHDU.selectedItem.tag):-1;BOOL normalized=_normalize.state==NSControlStateValueOn;
     if(other&&bh<0){[self showError:@"Choose a comparison HDU before updating the overlay."];return;}
     _plotNote.stringValue=@"Updating plot…";
     [self setBusy:YES message:other?@"Computing spectra on a shared bin grid…":@"Computing plot from source rows…"];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{Plot p;std::shared_ptr<Comparison> comparison;std::string err;
         try{if(other){comparison=std::make_shared<Comparison>(compareSpectra(*data,hi,o,*other,bh,normalized));p=comparison->a;}else p=makePlot(*data,hi,o);}catch(const std::exception& e){err=e.what();}NSString* error=S(err);
-        dispatch_async(dispatch_get_main_queue(),^{if(token!=self->_plotToken)return;if(error.length){[self showError:error];return;}self->_comparison=comparison;self->_canvas->plot=std::move(p);self->_canvas.hasOverlay=bool(comparison);
+        dispatch_async(dispatch_get_main_queue(),^{if(token!=self->_plotToken)return;if(error.length){[self showError:error];return;}self->_lastOptions=o;self->_hasAppliedPlot=YES;self->_comparison=comparison;self->_canvas->plot=std::move(p);self->_canvas.hasOverlay=bool(comparison);
             if(comparison){self->_canvas->overlay=comparison->b;self->_detailLabel.stringValue=@"SPECTRUM COMPARISON";self->_detail.string=S(comparison->report);}
-            [self->_canvas resetZoom];self->_plotNote.stringValue=S(self->_canvas->plot.note);self->_plotNote.toolTip=S(self->_canvas->plot.note);[self layout];[self setBusy:NO message:S(data->notes)];});
+            [self->_canvas resetZoom];if(restoreViewport&&restoredMax>restoredMin&&std::isfinite(restoredMin)&&std::isfinite(restoredMax)){double full=self->_canvas->plot.xMax-self->_canvas->plot.xMin;if(restoredMax-restoredMin>=full*1e-7&&restoredMax-restoredMin<=full*100){self->_canvas.viewMin=restoredMin;self->_canvas.viewMax=restoredMax;}}self->_plotNote.stringValue=S(self->_canvas->plot.note);self->_plotNote.toolTip=S(self->_canvas->plot.note);[self layout];[self setBusy:NO message:S(data->notes)];[self rememberWorkspace];});
     });
 }
 - (void)chooseOverlay:(id)sender {
@@ -694,7 +793,78 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     if(_tabs.selectedSegment==3)[self refreshTrace:nil];
     if(t.clickedRow==t.selectedRow&&NSApp.currentEvent.type==NSEventTypeLeftMouseDown){_inspectorMode.selectedSegment=1;[self inspectorChanged:nil];}
 }
+- (void)saveWindowLayout {
+    if(!_restoreEnabled)return;
+    [_preferences setObject:NSStringFromRect(_window.frame) forKey:@"WindowFrameV1"];
+    [_preferences setBool:_sidebarHidden forKey:@"SidebarHiddenV1"];[_preferences setBool:_inspectorHidden forKey:@"InspectorHiddenV1"];
+}
+- (void)restoreWindowFrame {
+    if(!_restoreEnabled)return;NSString* value=[_preferences stringForKey:@"WindowFrameV1"];if(!value.length)return;NSRect frame=NSRectFromString(value);
+    if(!std::isfinite(frame.origin.x)||!std::isfinite(frame.origin.y)||!std::isfinite(frame.size.width)||!std::isfinite(frame.size.height)||frame.size.width<_window.minSize.width||frame.size.height<_window.minSize.height)return;
+    NSScreen* screen=NSScreen.mainScreen;for(NSScreen* candidate in NSScreen.screens)if(NSIntersectsRect(frame,candidate.visibleFrame)){screen=candidate;break;}
+    if(screen)[_window setFrame:[_window constrainFrameRect:frame toScreen:screen] display:NO];
+}
+- (NSDictionary*)workspaceSnapshot {
+    if(!_data||_busy||_hdu<0||_hdu>=(int)_data->hdus.size())return nil;
+    const auto& h=_data->hdus[_hdu];const auto& o=_lastOptions;
+    if(h.columns.empty())return @{@"path":S(_data->path),@"hdu":@(_hdu),@"hduName":S(h.name)};
+    if(!_hasAppliedPlot)return nil;
+    if(o.x<0||o.x>=(int)h.columns.size()||o.y<0||o.y>=(int)h.columns.size())return nil;
+    auto number=[](double n){return std::isfinite(n)?[NSString stringWithFormat:@"%.17g",n]:@"";};
+    return @{@"path":S(_data->path),@"hdu":@(_hdu),@"hduName":S(h.name),@"mode":@(int(o.mode)),@"x":S(h.columns[o.x].name),@"y":S(h.columns[o.y].name),@"reduction":@(int(o.reduction)),@"rowAxis":@(o.seriesByRow),@"bins":@(o.bins),@"eventClass":@(o.eventClass),@"clean":@(o.cleanOnly),@"valueMin":number(o.valueMin),@"valueMax":number(o.valueMax),@"timeMin":number(o.timeMin),@"timeMax":number(o.timeMax),@"logY":@(_canvas.logY),@"viewMin":@(_canvas.viewMin),@"viewMax":@(_canvas.viewMax)};
+}
+- (void)rememberWorkspace {
+    if(!_restoreEnabled)return;NSDictionary* state=[self workspaceSnapshot];if(state)[_preferences setObject:state forKey:@"WorkspaceV1"];[self saveWindowLayout];
+}
+- (void)restoreWorkspaceControls:(NSDictionary*)state {
+    const auto& h=_data->hdus[_hdu];_restoreViewport=NO;
+    for(NSString* key in @[@"mode",@"reduction",@"bins",@"eventClass",@"rowAxis",@"clean",@"logY",@"viewMin",@"viewMax"])if(![state[key]isKindOfClass:NSNumber.class])return;
+    if(![state[@"x"]isKindOfClass:NSString.class]||![state[@"y"]isKindOfClass:NSString.class])return;
+    int x=findColumn(h,[state[@"x"]UTF8String]),y=findColumn(h,[state[@"y"]UTF8String]);NSInteger mode=[state[@"mode"]integerValue],reduce=[state[@"reduction"]integerValue],bins=[state[@"bins"]integerValue],eventClass=[state[@"eventClass"]integerValue];
+    if(x<0||y<0||!h.columns[x].numeric||!h.columns[y].numeric||mode<0||mode>3||reduce<0||reduce>2||bins<8||bins>4096||eventClass< -1||eventClass>1)return;
+    for(NSString* key in @[@"valueMin",@"valueMax",@"timeMin",@"timeMax"]){id value=state[key];if(![value isKindOfClass:NSString.class])return;if([value length]){const char* first=[value UTF8String];char* last=nullptr;double v=strtod(first,&last);if(last==first||*last||!std::isfinite(v))return;}}
+    if([state[@"valueMin"]length]&&[state[@"valueMax"]length]&&[state[@"valueMin"]doubleValue]>[state[@"valueMax"]doubleValue])return;
+    if([state[@"timeMin"]length]&&[state[@"timeMax"]length]&&[state[@"timeMin"]doubleValue]>[state[@"timeMax"]doubleValue])return;
+    if(![_seriesAxis itemAtIndex:0].enabled&&(mode==1||[state[@"timeMin"]length]||[state[@"timeMax"]length]))return;
+    [_x selectItemWithTag:x];[_y selectItemWithTag:y];[_mode selectItemAtIndex:mode];[_reduce selectItemAtIndex:reduce];_bins.stringValue=[@(bins)stringValue];
+    [_seriesAxis selectItemAtIndex:[state[@"rowAxis"]boolValue]||![_seriesAxis itemAtIndex:0].enabled?1:0];[_class selectItemAtIndex:_class.enabled?eventClass+1:0];_clean.state=_clean.enabled&&[state[@"clean"]boolValue]?NSControlStateValueOn:NSControlStateValueOff;
+    _min.stringValue=state[@"valueMin"];_max.stringValue=state[@"valueMax"];_tmin.stringValue=state[@"timeMin"];_tmax.stringValue=state[@"timeMax"];
+    _log.state=[state[@"logY"]boolValue]?NSControlStateValueOn:NSControlStateValueOff;_canvas.logY=_log.state==NSControlStateValueOn;
+    _restoredMin=[state[@"viewMin"]doubleValue];_restoredMax=[state[@"viewMax"]doubleValue];_restoreViewport=YES;
+}
+- (void)applicationWillTerminate:(NSNotification*)notification {[self rememberWorkspace];}
+- (void)chooseExport:(id)sender {
+    NSMenu* menu=[NSMenu new];for(NSArray* entry in @[@[@"Plot figure (.png)…",NSStringFromSelector(@selector(exportPNG:))],@[@"Plot figure (.pdf)…",NSStringFromSelector(@selector(exportPDF:))],@[@"Plot data (.csv)…",NSStringFromSelector(@selector(exportPlot:))]]){
+        NSMenuItem* item=[menu addItemWithTitle:entry[0] action:NSSelectorFromString(entry[1]) keyEquivalent:@""];item.target=self;
+    }
+    NSView* view=[sender isKindOfClass:NSView.class]?sender:_window.contentView;NSPoint point=view==_window.contentView?[_window.contentView convertPoint:_window.mouseLocationOutsideOfEventStream fromView:nil]:NSMakePoint(0,view.bounds.size.height);
+    [menu popUpMenuPositioningItem:nil atLocation:point inView:view];
+}
+- (PlotCanvas*)figureSnapshot {
+    PlotCanvas* figure=[[PlotCanvas alloc]initWithFrame:NSMakeRect(0,0,1200,800)];figure.exporting=YES;figure->plot=_canvas->plot;figure->overlay=_canvas->overlay;
+    figure.hasOverlay=_canvas.hasOverlay;figure.logY=_canvas.logY;figure.viewMin=_canvas.viewMin;figure.viewMax=_canvas.viewMax;
+    NSString* caption=[NSString stringWithFormat:@"COSI Explorer · Source: %@\n%@\n%@\nVisible X: %.17g to %.17g · Y display: %@%@",_data?S(_data->path):@"",S(figure->plot.settings),S(figure->plot.note),figure.viewMin,figure.viewMax,figure.logY&&!figure->plot.scatter?@"log10(1+y)":@"linear",figure->plot.scatter&&figure->plot.x.size()>50000?@" · Display thinned to at most 50,000 visible points; CSV retains collected values.":@""];
+    if(_comparison)caption=[caption stringByAppendingFormat:@"\nOverlay A: %@\nOverlay B: %@ · %@",S(_comparison->pathA),S(_comparison->pathB),_comparison->normalized?@"unit-area normalization":@"raw counts"];
+    figure.exportCaption=caption;NSMutableParagraphStyle* style=[NSMutableParagraphStyle new];style.lineBreakMode=NSLineBreakByWordWrapping;style.lineSpacing=3;
+    figure.captionHeight=std::ceil([caption boundingRectWithSize:NSMakeSize(1156,10000) options:NSStringDrawingUsesLineFragmentOrigin attributes:@{NSFontAttributeName:[NSFont systemFontOfSize:11],NSParagraphStyleAttributeName:style}].size.height)+16;
+    [figure setFrameSize:NSMakeSize(1200,650+figure.captionHeight+24)];return figure;
+}
+- (void)exportPNG:(id)sender {[self exportFigure:NO];}
+- (void)exportPDF:(id)sender {[self exportFigure:YES];}
+- (void)exportFigure:(BOOL)pdf {
+    if(_busy){NSBeep();_status.stringValue=@"Wait for the plot to finish updating before exporting.";return;}
+    if(_canvas.contentMode!=0||_canvas.hidden||_canvas->plot.x.empty()){[self showError:@"Create a table plot in Explore before exporting a figure."];return;}
+    // Render before opening the panel so later navigation cannot change the chosen figure.
+    NSData* data=[[self figureSnapshot]figureDataAsPDF:pdf];if(!data.length){[self showError:@"Unable to render the plot figure."];return;}
+    NSArray<NSString*>* sources=_comparison?@[S(_comparison->pathA),S(_comparison->pathB)]:@[S(_data->path)];
+    NSSavePanel* panel=[NSSavePanel savePanel];panel.allowedContentTypes=pdf?@[UTTypePDF]:@[UTTypePNG];panel.nameFieldStringValue=pdf?@"cosi-plot.pdf":@"cosi-plot.png";
+    [panel beginSheetModalForWindow:_window completionHandler:^(NSModalResponse response){if(response!=NSModalResponseOK)return;
+        for(NSString* source in sources)if([panel.URL.path.stringByResolvingSymlinksInPath isEqualToString:source.stringByResolvingSymlinksInPath]){[self showError:@"Choose an export path different from your source data file."];return;}
+        NSError* error=nil;if(![data writeToURL:panel.URL options:NSDataWritingAtomic error:&error])[self showError:error.localizedDescription];else self->_status.stringValue=[@"Exported " stringByAppendingString:panel.URL.path];
+    }];
+}
 - (void)exportPlot:(id)sender {
+    if(_busy){NSBeep();return;}
     if(_canvas->plot.x.empty()){[self showError:@"Create a plot before exporting."];return;}NSSavePanel* p=[NSSavePanel savePanel];p.nameFieldStringValue=@"cosi-plot.csv";
     // Capture exactly the plot the user chose, even if a different file is opened while the save panel is active.
     auto plot=std::make_shared<Plot>(_canvas->plot);auto comparison=_comparison;NSString* source=_data?S(_data->path):@"";
@@ -767,10 +937,66 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     }
     _expectedColumnPlot=makePlot(*_data,_hdu,options);++_columnStep;_columnStarted=_smokeTicks;
 }
+- (void)saveTestFigure:(NSString*)name {
+    PlotCanvas* snapshot=[self figureSnapshot];NSData* pdf=[snapshot figureDataAsPDF:YES],*png=[snapshot figureDataAsPDF:NO];
+    if(!pdf.length||!png.length||![[[NSString alloc]initWithData:[pdf subdataWithRange:NSMakeRange(0,5)] encoding:NSASCIIStringEncoding]isEqualToString:@"%PDF-"])throw std::runtime_error("Figure rendering failed");
+    NSBitmapImageRep* bitmap=[NSBitmapImageRep imageRepWithData:png];if(bitmap.pixelsWide!=2400||bitmap.pixelsHigh<1300)throw std::runtime_error("PNG must be a readable 2x figure");
+    if(!snapshot->plot.scatter){
+        size_t bin=std::max_element(snapshot->plot.y.begin(),snapshot->plot.y.end())-snapshot->plot.y.begin();NSRect r=[snapshot chartRect];
+        NSInteger x=std::llround(2*(r.origin.x+(snapshot->plot.x[bin]-snapshot.viewMin)/(snapshot.viewMax-snapshot.viewMin)*r.size.width));NSInteger y=std::llround(2*(NSMaxY(r)-10));
+        NSColor* color=[[bitmap colorAtX:x y:y]colorUsingColorSpace:NSColorSpace.sRGBColorSpace];if(color.redComponent<.7)throw std::runtime_error("PDF/PNG histogram fill must stay pale and readable");
+    }
+    if(![pdf writeToFile:[_smokeDir stringByAppendingPathComponent:[name stringByAppendingString:@".pdf"]] atomically:YES]||![png writeToFile:[_smokeDir stringByAppendingPathComponent:[name stringByAppendingString:@".png"]] atomically:YES])throw std::runtime_error("Figure output failed");
+}
+- (void)checkRestoredToolsState {
+    const auto& o=_lastOptions;if(o.mode!=Mode::Series||!o.seriesByRow||o.reduction!=Reduction::Sum||o.eventClass!=0||o.valueMin!=500||o.timeMin!=100||o.timeMax!=450||!_sidebarHidden||_inspectorHidden)throw std::runtime_error("Workspace controls or layout were not restored");
+    double span=_canvas->plot.xMax-_canvas->plot.xMin;if(std::abs(_canvas.viewMin-(_canvas->plot.xMin+.2*span))>1e-8||std::abs(_canvas.viewMax-(_canvas->plot.xMin+.7*span))>1e-8)throw std::runtime_error("Workspace viewport was not restored");
+    NSRect expected=NSRectFromString([_preferences stringForKey:@"TestExpectedFrame"]);if(_window.screen)expected=[_window constrainFrameRect:expected toScreen:_window.screen];if(std::abs(_window.frame.size.width-expected.size.width)>1||std::abs(_window.frame.size.height-expected.size.height)>1)throw std::runtime_error("Window size was not restored");
+    if(_canvas->plot.sourceRows.empty()||_canvas->plot.x.front()!=_canvas->plot.sourceRows.front())throw std::runtime_error("Restored original row provenance");
+}
+- (void)plotToolsTestTick {
+    [_canvas displayIfNeeded];
+    if(_restoredToolsRun){
+        [self checkRestoredToolsState];[self savePreview:@"restored-workspace.png"];
+        if(![_preferencesSuite hasPrefix:@"org.local.cosiexplorer.tests."])throw std::runtime_error("Expected isolated test preferences");
+        _restoreEnabled=NO;[_preferences removePersistentDomainForName:_preferencesSuite];[_preferences synchronize];
+        [@"PASS: workspace reopened the last file/HDU, columns, reduction, class/value/time filters, viewport, and panel layout in an isolated preferences suite.\n" writeToFile:[_smokeDir stringByAppendingPathComponent:@"ui-result.txt"] atomically:YES encoding:NSUTF8StringEncoding error:nil];[NSApp terminate:nil];return;
+    }
+    if(_smokeStep==0){
+        if(_canvas->plot.sourceRows.size()!=1200||_canvas->_targets.empty()||![_header.string hasPrefix:S(_data->hdus[_hdu].header)]||![_header.string containsString:@"Viewer notes (generated by COSI Explorer"])throw std::runtime_error("Point provenance or viewer note separation");
+        auto target=std::find_if(_canvas->_targets.begin(),_canvas->_targets.end(),[](const PlotTarget& value){return value.index==300;});if(target==_canvas->_targets.end())throw std::runtime_error("Expected hover target missing");auto point=target->point;NSEvent* event=[NSEvent mouseEventWithType:NSEventTypeMouseMoved location:[_canvas convertPoint:point toView:nil] modifierFlags:0 timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:_window.windowNumber context:nil eventNumber:0 clickCount:0 pressure:0];[_canvas mouseMoved:event];
+        NSString* info=[_canvas hoverDetailsAtPoint:_canvas.hover];if(![info containsString:@"Original row: 301"]||![info containsString:@"TIME [s]: 150"]||![info containsString:@"ENERGY [keV]"])throw std::runtime_error("Hover must show the actual source point");
+        if([_canvas hoverDetailsAtPoint:NSMakePoint(-1,-1)])throw std::runtime_error("Hover outside plot must clear");
+        [self savePreview:@"01-time-hover.png"];[self saveTestFigure:@"time-series"];
+        [_seriesAxis selectItemAtIndex:1];[_reduce selectItemAtIndex:2];[_class selectItemAtIndex:1];_min.stringValue=@"500";_tmin.stringValue=@"100";_tmax.stringValue=@"450";
+        [NSApp sendAction:_seriesAxis.action to:_seriesAxis.target from:_seriesAxis];_smokeStep=1;
+    }else if(_smokeStep==1){
+        if(_canvas->plot.sourceRows.empty()||_canvas->plot.sourceRows.size()>=900)throw std::runtime_error("Expected filtered row plot");
+        for(size_t i=0;i<_canvas->plot.x.size();++i)if(_canvas->plot.x[i]!=_canvas->plot.sourceRows[i]||_canvas->plot.sourceTimes[i]<100||_canvas->plot.y[i]<500)throw std::runtime_error("Filtered hover provenance");
+        [_window setContentSize:NSMakeSize(1320,860)];_sidebarHidden=YES;_inspectorHidden=NO;[self layout];double span=_canvas->plot.xMax-_canvas->plot.xMin;_canvas.viewMin=_canvas->plot.xMin+.2*span;_canvas.viewMax=_canvas->plot.xMin+.7*span;_canvas.needsDisplay=YES;[_canvas displayIfNeeded];
+        [_preferences setObject:NSStringFromRect(_window.frame) forKey:@"TestExpectedFrame"];_toolsWorkspace=[self workspaceSnapshot];if(!_toolsWorkspace)throw std::runtime_error("Workspace snapshot missing");
+        auto point=_canvas->_targets.at(_canvas->_targets.size()/2).point;_canvas.hover=point;_canvas.needsDisplay=YES;[self savePreview:@"02-filtered-row-hover.png"];[self saveTestFigure:@"filtered-rows"];
+        _tmin.stringValue=@"";_tmax.stringValue=@"";[_mode selectItemAtIndex:0];[NSApp sendAction:_mode.action to:_mode.target from:_mode];_smokeStep=2;
+    }else if(_smokeStep==2){
+        _log.state=NSControlStateValueOn;[self toggleLog:nil];[self loadOverlayPath:S(_data->path)];_smokeStep=3;
+    }else if(_smokeStep==3){
+        if(!_comparison)return;[_canvas displayIfNeeded];NSRect r=[_canvas chartRect];_canvas.hover=NSMakePoint(NSMidX(r),NSMidY(r));NSString* info=[_canvas hoverDetailsAtPoint:_canvas.hover];
+        if(![info containsString:@"Bin: ["]||![info containsString:@"B "]||[info containsString:@"Original row"])throw std::runtime_error("Histogram hover must describe bins, not source rows");
+        [self savePreview:@"03-overlay-bin-hover.png"];[self saveTestFigure:@"log-overlay"];
+        _normalize.state=NSControlStateValueOn;[self overlayNormalizationChanged:nil];_smokeStep=4;
+    }else if(_smokeStep==4){
+        if(!_comparison||!_comparison->normalized)return;[self saveTestFigure:@"normalized-overlay"];
+        _overlayData.reset();_comparison.reset();_canvas.hasOverlay=NO;[self restoreWorkspaceControls:_toolsWorkspace];[self updatePlot:nil];_smokeStep=5;
+    }else{
+        [self rememberWorkspace];[_preferences synchronize];[self checkRestoredToolsState];
+        [@"PASS: native hover target/action shows full-precision plotted values and original row/time provenance; filtered row provenance; bin hover with overlays; PNG/PDF snapshots of time/row/log-overlay/normalized-overlay plots; viewer note separation; saved applied workspace and viewport.\n" writeToFile:[_smokeDir stringByAppendingPathComponent:@"ui-result.txt"] atomically:YES encoding:NSUTF8StringEncoding error:nil];[NSApp terminate:nil];return;
+    }
+}
 - (void)smokeTick {
     if(++_smokeTicks>300){[@"FAIL: asynchronous UI check timed out" writeToFile:[_smokeDir stringByAppendingPathComponent:@"ui-result.txt"] atomically:YES encoding:NSUTF8StringEncoding error:nil];[NSApp terminate:nil];return;}
     BOOL ready=_data&&!_busy&&!_files.empty()&&!_page.rows.empty()&&!_canvas->plot.x.empty()&&_detail.string.length&&[_detail.string rangeOfString:@"Select a row"].location==NSNotFound;
     try {
+        if(_plotToolsTest){if(_data&&!_busy&&!_page.rows.empty()&&!_canvas->plot.x.empty())[self plotToolsTestTick];if(!NSApp.running)return;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,200*NSEC_PER_MSEC),dispatch_get_main_queue(),^{[self smokeTick];});return;}
         if(ready&&!_smokePrepared){
             PlotOptions startup;startup.mode=Mode::Series;startup.x=findColumn(_data->hdus[_hdu],"ENERGY");
             auto expected=makePlot(*_data,_hdu,startup);

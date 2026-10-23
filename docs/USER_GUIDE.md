@@ -117,3 +117,13 @@ A custom-tap cask generator is included. A live `brew install --cask` command re
 ## Try it without mission files
 
 Download the [synthetic demo](https://github.com/mwy-wing/COSI-FITS-EXPLORER/releases/download/v0.1.0/synthetic-events.fits) and open it with **Open file…**. Start with Column values, ENERGY, and Time; switch to Row number or Histogram. These invented values contain no observation data. See [the example notes](../examples/README.md) for its columns and generator.
+
+## Plot tools in v0.1.1 (current source and local build)
+
+Move the pointer near a displayed point to inspect X/Y at full plotted precision, its original 1-based row, and its stored time when available. Filters preserve source row numbers. For array columns, points retain their parent row after active-hit clipping and reduction. Hovering a histogram shows the bin interval, center, and plotted values/counts; an overlay adds B's value. The final bin includes the upper edge.
+
+Hover identifies displayed points within 12 screen points. Dense views retain the existing 50,000-point display limit; zoom in to inspect more of the collected points. Plot coordinates use double precision; the table and Selection inspector preserve exact integer identifiers.
+
+Use the toolbar's **Export plot** button for PNG, PDF, or CSV, or **File → Export Plot PNG/PDF…**. Figures include axis labels/units, the original source path, applied filters/reduction, visible X range, logarithmic display state, scan limits, and overlay normalization. PNG is rendered at 2× resolution; PDF retains searchable text and vector plot drawing. Hover cards, toolbar buttons, and the data table are excluded. The figure is captured when export starts, before the Save panel opens. Figure export is available for Explore's table plots; CSV export keeps the collected plotted values.
+
+On reopening, the app restores the last successfully loaded file/HDU, applied plot settings, X viewport, window size/position, and library/inspector visibility. Source files are reopened read-only. Missing files or incompatible stored settings fall back to the usual empty/default view. Comparisons must be reopened separately. Settings are saved locally through macOS preferences; launch with `--no-restore` to skip workspace restoration and saving for that session. The published v0.1.0 download does not include these new plot tools.
