@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Original COSI Explorer logo and a native macOS Dock icon.
+
 - Public synthetic FITS example and a reproducible generator that refuses overwrites.
 - Automated macOS app/core builds and Linux core/CLI builds with three CTest suites.
 - Direct Mac download and demo links, plus an animation of the native app, in the README.

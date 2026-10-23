@@ -29,7 +29,8 @@ add_test(NAME synthetic_demo COMMAND cosi-demo-tests "${CMAKE_CURRENT_SOURCE_DIR
 if(APPLE)
   enable_language(OBJCXX)
   set(CMAKE_OBJCXX_STANDARD 17)
-  add_executable(COSIExplorer MACOSX_BUNDLE src/App.mm)
+  set_source_files_properties(resources/COSIExplorer.icns PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+  add_executable(COSIExplorer MACOSX_BUNDLE src/App.mm resources/COSIExplorer.icns)
   target_compile_options(COSIExplorer PRIVATE -fobjc-arc -Wall -Wextra -Wno-unused-parameter)
   target_link_libraries(COSIExplorer PRIVATE cosi_data "-framework Cocoa")
   set_target_properties(COSIExplorer PROPERTIES

@@ -5,6 +5,7 @@
 <key>CFBundleIdentifier</key><string>org.local.cosiexplorer</string>
 <key>CFBundleName</key><string>COSI Explorer</string>
 <key>CFBundleDisplayName</key><string>COSI Explorer</string>
+<key>CFBundleIconFile</key><string>COSIExplorer.icns</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>0.1.0</string>
 <key>CFBundleVersion</key><string>6</string>

@@ -46,3 +46,7 @@ The README screenshot is rendered from the native app with generated synthetic e
 The v0.1.0 release was published on GitHub. All five public asset downloads (DMG, app ZIP, original tagged source ZIP, checksum manifest, and supplemental demo) were downloaded without authentication and matched their local SHA-256 values. The uploaded asset digests also matched.
 
 The README animation contains three native view captures: Time, Row number, and Histogram. The capture harness checked 1,200 values and the expected axis endpoints before saving; the histogram accepted all 1,200 rows. GIF metadata confirms three 1320 × 900 frames at 2.5 seconds each. The source captures were visually reviewed. Only the encoded public GIF is included in the source allowlist.
+
+## Application logo
+
+The generated RGBA logo was preserved unchanged. Standard/Retina icon derivatives were assembled with macOS iconutil; the ICNS container contains all expected sizes through 1024 pixels. CMake builds and packages the icon in Resources, and the built Info.plist selects it. The local app was rebuilt and all three CTest suites passed. A clean extraction of its ZIP passed strict signature verification. Both PNG and ICNS are in the source allowlist. The published v0.1.0 assets were not replaced.
