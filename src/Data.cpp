@@ -215,18 +215,25 @@ std::shared_ptr<Dataset> openDataset(const std::string& path) {
     h.header=header.str();d->hdus.push_back(h);d->notes+="No calibration applied. Raw PHA/TAC are channels. Unknown APID payloads stay undecoded.";
     return d;
 }
-Page readPage(const Dataset& d,int hi,long long start,int count) {
-    const auto& h=d.hdus.at(hi);Page page;page.start=std::clamp<long long>(start,0,h.rows);
-    auto end=std::min<long long>(h.rows,page.start+std::clamp(count,0,1000));
+Page readRows(const Dataset& d,int hi,const std::vector<long long>& sourceRows,long long start,int count) {
+    const auto& h=d.hdus.at(hi);Page page;page.start=std::clamp<long long>(start,0,sourceRows.size());
+    auto end=page.start+std::min<long long>(sourceRows.size()-page.start,std::clamp(count,0,1000));
+    for(auto i=page.start;i<end;++i){auto row=sourceRows[i];if(row<1||row>h.rows)throw std::runtime_error("Requested source row is outside this table");page.sourceRows.push_back(row);}
+    if(page.sourceRows.empty())return page;
     if(d.fits) {
         Fits f(d.path);f.move(h.number);
-        for(auto r=page.start;r<end;++r) {std::vector<std::string> row;for(size_t c=0;c<h.columns.size();++c) row.push_back(cell(f.f,h.columns[c],c,r+1));page.rows.push_back(row);}
-    } else {
+        for(auto sourceRow:page.sourceRows){std::vector<std::string> row;for(size_t c=0;c<h.columns.size();++c)row.push_back(cell(f.f,h.columns[c],c,sourceRow));page.rows.push_back(std::move(row));}
+    }else {
         std::ifstream in(d.path,std::ios::binary);
-        for(auto r=page.start;r<end;++r) {const auto& p=d.packets.at(r);auto b=packetBytes(in,p);auto raw=decode(p,b);std::vector<std::string> row;
-            for(int c=0;c<14;++c) {if(c==2) {std::ostringstream s;s<<"0x"<<std::hex<<std::uppercase<<p.apid;row.push_back(s.str());}
-            else row.push_back(list(rawValues(p,raw,c),c>=9));}page.rows.push_back(row);}
+        for(auto sourceRow:page.sourceRows){const auto& p=d.packets.at(sourceRow-1);auto b=packetBytes(in,p);auto raw=decode(p,b);std::vector<std::string> row;
+            for(int c=0;c<14;++c){if(c==2){std::ostringstream s;s<<"0x"<<std::hex<<std::uppercase<<p.apid;row.push_back(s.str());}else row.push_back(list(rawValues(p,raw,c),c>=9));}page.rows.push_back(std::move(row));}
     }return page;
+}
+Page readPage(const Dataset& d,int hi,long long start,int count) {
+    const auto& h=d.hdus.at(hi);start=std::clamp<long long>(start,0,h.rows);
+    auto end=start+std::min<long long>(h.rows-start,std::clamp(count,0,1000));std::vector<long long> rows;
+    for(auto row=start;row<end;++row)rows.push_back(row+1);
+    auto page=readRows(d,hi,rows,0,count);page.start=start;return page;
 }
 std::string rowDetail(const Dataset& d,int hi,long long row) {
     const auto& h=d.hdus.at(hi);if(row<0||row>=h.rows) return "Select a row to inspect its values.";
@@ -284,7 +291,7 @@ Plot makePlot(const Dataset& d,int hi,const PlotOptions& o) {
             // A light curve counts rows/events once, even when the gate column contains multiple hits.
             if(o.mode==Mode::LightCurve)break;
         }
-        if(accepted)++p.accepted;if(cap)break;
+        if(accepted){++p.accepted;p.acceptedRows.push_back(r+1);}if(cap)break;
     }
     p.values=xs.size();p.scatter=o.mode==Mode::Scatter||series;
     const auto& meanValues=series?ys:xs;

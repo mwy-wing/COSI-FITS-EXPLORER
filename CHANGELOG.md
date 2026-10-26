@@ -2,6 +2,9 @@
 
 ## 0.1.1 — in development
 
+- All rows / Plotted rows table views, with original row IDs, filtered paging/jumps, and restored table choice.
+- Contributing-row lists for point, histogram, event-count, and source-A overlay plots, with empty-result recovery.
+
 - Click plotted points to select their original table rows across pages and reveal all fields.
 - Inspect/Pan/Box zoom controls, rectangle zoom on both axes, and undoable Back/Reset navigation.
 - X/Y viewport restoration and figure provenance; selected-row highlighting in point plots.

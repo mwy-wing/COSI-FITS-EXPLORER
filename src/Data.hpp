@@ -17,7 +17,11 @@ struct Dataset {
     std::vector<HDU> hdus;
     std::vector<Packet> packets;
 };
-struct Page { long long start = 0; std::vector<std::vector<std::string>> rows; };
+struct Page {
+    long long start = 0; // Position in the requested row list (source offset for readPage).
+    std::vector<std::vector<std::string>> rows;
+    std::vector<long long> sourceRows; // Original 1-based rows, aligned with rows.
+};
 enum class Reduction { Elements, First, Sum };
 enum class Mode { Histogram, LightCurve, Scatter, Series };
 struct PlotOptions {
@@ -34,6 +38,8 @@ struct Plot {
     // Point provenance is empty for aggregated histograms/light curves. Rows are 1-based.
     std::vector<long long> sourceRows;
     std::vector<double> sourceTimes;
+    // Unique, ordered source rows contributing collected values, including aggregate plots.
+    std::vector<long long> acceptedRows;
     std::vector<double> x, y;
     double xMin = 0, xMax = 1, yMin = 0, yMax = 1;
     double mean = NaN;
@@ -58,6 +64,7 @@ struct TraceResult { std::string eventID, run, summary; std::vector<TraceStage> 
 struct Comparison { Plot a, b; std::string pathA, pathB, report; bool normalized = false; };
 std::shared_ptr<Dataset> openDataset(const std::string& path);
 Page readPage(const Dataset&, int hdu, long long start, int count = 250);
+Page readRows(const Dataset&, int hdu, const std::vector<long long>& sourceRows, long long start, int count = 250);
 std::string rowDetail(const Dataset&, int hdu, long long row);
 Plot makePlot(const Dataset&, int hdu, const PlotOptions&);
 Image readImage(const Dataset&, int hdu);

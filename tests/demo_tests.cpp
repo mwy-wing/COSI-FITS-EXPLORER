@@ -32,9 +32,17 @@ int main(int argc, char** argv) {
             require(static_cast<int>(rows.x[i]) % 4 != 1, "Photoabsorption rows excluded");
             require(rows.y[i] == time.y[static_cast<size_t>(rows.x[i]) - 1], "Time and row views preserve energy values");
         }
+        require(rows.acceptedRows==rows.sourceRows,"Scalar row index matches point provenance");
+        auto page=cosi::readRows(*data,1,rows.acceptedRows,250);
+        require(page.start==250&&page.rows.size()==250&&page.sourceRows.front()==rows.acceptedRows[250],"Filtered page starts at the requested match position");
+        for(size_t i=0;i<page.rows.size();++i){
+            require(page.rows[i][0]==std::to_string(page.sourceRows[i]),"Filtered EVENTID and original Row remain aligned");
+            require(page.sourceRows[i]%4!=1,"Paged rows retain the applied class filter");
+        }
         options.mode = cosi::Mode::Histogram;
         auto histogram = cosi::makePlot(*data, 1, options);
         require(std::accumulate(histogram.y.begin(), histogram.y.end(), 0.0) == 900, "Histogram accounts for every selected event");
+        require(histogram.acceptedRows==rows.acceptedRows,"Aggregate plots retain the same contributing source rows");
         std::cout << "PASS: synthetic demo, axes, class filtering, and histogram\n";
         return 0;
     } catch (const std::exception& error) {

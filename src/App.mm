@@ -432,7 +432,9 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     NSTextField *_bins,*_min,*_max,*_tmin,*_tmax,*_jump;
     NSButton *_rootButton,*_openButton,*_plotButton,*_log,*_clean,*_previous,*_next,*_go,*_export;
     PlotCanvas* _canvas;NSProgressIndicator* _spinner;
-    NSSegmentedControl* _plotInteraction;NSButton *_zoomBack,*_zoomReset;
+    NSSegmentedControl *_plotInteraction,*_tableMode;NSButton *_zoomBack,*_zoomReset;
+    std::shared_ptr<const std::vector<long long>> _plottedRows,_pageIndex;
+    BOOL _pageFiltered,_pageLoading,_tableRowsChecked;
     NSString* _smokeDir;NSInteger _smokeStep,_smokeTicks;
     BOOL _columnTest,_smokePrepared,_plotToolsTest,_restoredToolsRun;NSDictionary* _toolsWorkspace;NSString* _preferencesSuite;NSInteger _columnStep,_columnStarted;Plot _expectedColumnPlot;
     std::shared_ptr<Dataset> _overlayData;std::shared_ptr<Comparison> _comparison;TraceResult _trace;
@@ -505,7 +507,7 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     _eventTable=[self tableWithIdentifier:@"events"];_eventTable.rowHeight=29;_eventTable.usesAlternatingRowBackgroundColors=YES;_eventTable.style=NSTableViewStyleFullWidth;_eventScroll=scroll(_eventTable);
     _detail=reader();_detailScroll=scroll(_detail);_detailScroll.hasHorizontalScroller=NO;_detailLabel=label(@"SELECTED ROW",10,accent());
     _previous=button(@"←",self,@selector(previousPage:));_next=button(@"→",self,@selector(nextPage:));_pageLabel=label(@"Table preview · 250 rows per page",10,muted());
-    _jump=field(@"Row #");_go=button(@"Go",self,@selector(jumpPage:));
+    _jump=field(@"Row #");_jump.toolTip=@"Jump to an original 1-based source row. In Plotted rows, the row must contribute to the applied plot.";_go=button(@"Go",self,@selector(jumpPage:));
     _header=reader();_headerScroll=scroll(_header);_headerScroll.hasHorizontalScroller=NO;_headerScroll.hidden=YES;
     _traceView=reader();_traceView.string=@"Select a FITS event row in Explore, then open Trace event.";_traceScroll=scroll(_traceView);_traceScroll.hasHorizontalScroller=NO;_traceScroll.hidden=YES;
     _traceButton=button(@"Refresh trace",self,@selector(refreshTrace:));_chooseL0=button(@"Choose L0…",self,@selector(chooseTraceL0:));
@@ -547,7 +549,9 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     for(NSPopUpButton* p in @[_hduChoice,_mode,_x,_y,_seriesAxis,_reduce,_class,_overlayHDU,_traceStage]){p.font=[NSFont systemFontOfSize:12];p.bezelStyle=NSBezelStyleRounded;}
     _hduChoice.toolTip=@"Select a FITS extension or packet table";
     _eventTitle=label(@"Event table",14,ink());_eventTitle.font=[NSFont systemFontOfSize:14 weight:NSFontWeightSemibold];[_surface addSubview:_eventTitle];
-    _eventCaption=label(@"Source rows · plot filters do not change this table",10,muted());[_surface addSubview:_eventCaption];
+    _eventCaption=label(@"All source rows",10,muted());[_surface addSubview:_eventCaption];
+    _tableMode=[NSSegmentedControl segmentedControlWithLabels:@[@"All rows",@"Plotted rows"] trackingMode:NSSegmentSwitchTrackingSelectOne target:self action:@selector(tableModeChanged:)];_tableMode.selectedSegment=0;
+    _tableMode.toolTip=@"All rows: the full source table. Plotted rows: unique source rows contributing values to the applied plot, before display thinning or zoom. Scan limits apply. Overlays show source A only.";[_surface addSubview:_tableMode];
     _inspectorPanel=[Surface new];_inspectorPanel.fill=panel();card(_inspectorPanel);[_surface addSubview:_inspectorPanel];
     _inspectorMode=[[NSSegmentedControl alloc]initWithFrame:NSZeroRect];[_inspectorMode setSegmentCount:2];[_inspectorMode setLabel:@"Plot settings" forSegment:0];[_inspectorMode setLabel:@"Selection" forSegment:1];_inspectorMode.selectedSegment=0;_inspectorMode.segmentStyle=NSSegmentStyleRounded;_inspectorMode.font=[NSFont systemFontOfSize:12];_inspectorMode.target=self;_inspectorMode.action=@selector(inspectorChanged:);[_inspectorPanel addSubview:_inspectorMode];
     _settingsContent=[Surface new];_settingsContent.fill=panel();_settingsScroll=scroll(_settingsContent);_settingsScroll.hasHorizontalScroller=NO;_settingsScroll.drawsBackground=NO;[_inspectorPanel addSubview:_settingsScroll];
@@ -631,11 +635,11 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     CGFloat chartH=std::clamp((H-200)*.47,270.,360.);
     _plotInteraction.frame=NSMakeRect(x-2,top,210,26);_zoomBack.frame=NSMakeRect(x+216,top-2,78,30);_zoomReset.frame=NSMakeRect(x+298,top-2,70,30);
     BOOL tools=explore&&_canvas.contentMode==0;for(NSView* v in @[_plotInteraction,_zoomBack,_zoomReset])v.hidden=!tools;
-    CGFloat plotTop=top+(tools?34:0);chartH=std::min(chartH,std::max(220.,H-plotTop-230));[self updatePlotTools];
+    CGFloat plotTop=top+(tools?34:0);chartH=std::min(chartH,std::max(220.,H-plotTop-230));[self updatePlotTools];[self updateTableTools];
     _canvas.frame=explore?NSMakeRect(x,plotTop,cw,chartH):NSMakeRect(x,top,w,H-top-42);
     _plotNote.frame=NSMakeRect(x+2,plotTop+chartH+9,cw-4,20);
     CGFloat titleY=plotTop+chartH+42,tableY=titleY+31,tableH=std::max(90.,H-tableY-67);
-    _eventTitle.frame=NSMakeRect(x,titleY,130,23);_eventCaption.frame=NSMakeRect(x+140,titleY+3,std::max(30.,cw-140),19);
+    _eventTitle.frame=NSMakeRect(x,titleY,130,23);_eventCaption.frame=NSMakeRect(x+136,titleY+3,std::max(30.,cw-362),19);_tableMode.frame=NSMakeRect(x+cw-218,titleY,220,26);
     _eventScroll.frame=NSMakeRect(x,tableY,cw,tableH);
     _previous.frame=NSMakeRect(x-3,H-54,80,29);_next.frame=NSMakeRect(x+80,H-54,62,29);
     _pageLabel.frame=NSMakeRect(x+153,H-48,std::max(70.,cw-294),20);_jump.frame=NSMakeRect(x+cw-122,H-52,72,25);_go.frame=NSMakeRect(x+cw-44,H-54,47,29);_export.hidden=YES;
@@ -686,7 +690,7 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     if(!_data)return;for(size_t row=0;row<_visible.size();++row)if(_files[_visible[row]].path==_data->path){_syncingCatalog=YES;[_fileTable selectRowIndexes:[NSIndexSet indexSetWithIndex:row] byExtendingSelection:NO];[_fileTable scrollRowToVisible:row];_syncingCatalog=NO;break;}
 }
 - (void)setBusy:(BOOL)busy message:(NSString*)message {
-    _busy=busy;if(busy)[_canvas cancelInteraction];[self updatePlotTools];_plotButton.enabled=!busy;_status.toolTip=message;
+    _busy=busy;if(busy)[_canvas cancelInteraction];[self updatePlotTools];[self updateTableTools];_plotButton.enabled=!busy;_status.toolTip=message;
     _status.stringValue=!busy&&_data&&[message isEqualToString:S(_data->notes)]&&![message containsString:@"WARNING"]?@"Read only  ·  Original units and timestamps":message;
     if(busy)[_spinner startAnimation:nil];else[_spinner stopAnimation:nil];
 }
@@ -716,7 +720,7 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
 - (void)openPath:(NSString*)path {
     if(_pendingWorkspace&&![_pendingWorkspace[@"path"]isEqualToString:path])_pendingWorkspace=nil;
     BOOL dir=NO;if([[NSFileManager defaultManager]fileExistsAtPath:path isDirectory:&dir]&&dir){_root=path;_rootLabel.stringValue=path;[self scanRoot];return;}
-    NSUInteger token=++_openToken;++_plotToken;++_pageToken;++_traceToken;++_overlayLoadToken;_data.reset();_page=Page{};_selectedRow=-1;_traceL0Path=nil;
+    NSUInteger token=++_openToken;++_plotToken;++_pageToken;++_traceToken;++_overlayLoadToken;_data.reset();_hasAppliedPlot=NO;_plottedRows.reset();_pageIndex.reset();_pageLoading=NO;_page=Page{};_selectedRow=-1;_traceL0Path=nil;
     _trace=TraceResult{};_traceView.string=@"Select an event to trace.";[_traceStage removeAllItems];_openStage.enabled=NO;
     _traceCards->result=TraceResult{};_traceCards.needsDisplay=YES;_metrics.values=@[@"Loading…",@"—",@"—",@"—"];_metrics.needsDisplay=YES;
     _traceButton.enabled=YES;
@@ -736,7 +740,7 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     });
 }
 - (void)changeHDU:(id)sender {
-    if(!_data)return;_hasAppliedPlot=NO;_hdu=int(_hduChoice.indexOfSelectedItem);++_plotToken;++_pageToken;++_traceToken;++_overlayLoadToken;const auto& h=_data->hdus[_hdu];
+    if(!_data)return;_hasAppliedPlot=NO;_plottedRows.reset();_pageIndex.reset();_pageFiltered=NO;_pageLoading=NO;_tableMode.selectedSegment=0;_hdu=int(_hduChoice.indexOfSelectedItem);++_plotToken;++_pageToken;++_traceToken;++_overlayLoadToken;const auto& h=_data->hdus[_hdu];
     _overlayData.reset();_comparison.reset();_canvas.hasOverlay=NO;_overlayLabel.stringValue=@"";[_overlayHDU removeAllItems];[_overlayHDU addItemWithTitle:@"Comparison HDU"];_overlayHDU.enabled=NO;_clearOverlay.enabled=NO;_overlayButton.enabled=YES;
     _trace=TraceResult{};_traceView.string=@"Select an event to trace.";[_traceStage removeAllItems];_openStage.enabled=NO;
     _traceCards->result=TraceResult{};_traceCards.needsDisplay=YES;_inspectorMode.selectedSegment=0;
@@ -781,7 +785,7 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     for(NSView* v in @[_mode,_x,_y,_seriesAxis,_reduce,_bins,_log,_filterLabel,_min,_max,_tmin,_tmax,_class,_clean,_plotButton,_plotNote,_eventScroll,_detailLabel,_detailScroll,_previous,_next,_pageLabel,_jump,_go,_export])v.hidden=!explore;
     for(NSView* v in @[_overlayButton,_overlayHDU,_normalize,_clearOverlay,_overlayLabel])v.hidden=!explore;
     for(NSView* v in @[_traceScroll,_traceButton,_chooseL0,_traceStage,_openStage,_traceLabel])v.hidden=!trace;
-    _traceCardsScroll.hidden=!trace;_traceDetailsHeading.hidden=!trace;_eventTitle.hidden=!explore;_eventCaption.hidden=!explore;
+    _traceCardsScroll.hidden=!trace;_traceDetailsHeading.hidden=!trace;_eventTitle.hidden=!explore;_eventCaption.hidden=!explore;_tableMode.hidden=!explore;
     _headerScroll.hidden=!header;_canvas.hidden=header||trace;_canvas.contentMode=geom?2:(_data&&!_data->hdus[_hdu].axes.empty()?1:0);
     [self modeChanged:nil];[self layout];_canvas.needsDisplay=YES;
     [self inspectorChanged:nil];
@@ -804,9 +808,9 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     [self setBusy:YES message:other?@"Computing spectra on a shared bin grid…":@"Computing plot from source rows…"];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{Plot p;std::shared_ptr<Comparison> comparison;std::string err;
         try{if(other){comparison=std::make_shared<Comparison>(compareSpectra(*data,hi,o,*other,bh,normalized));p=comparison->a;}else p=makePlot(*data,hi,o);}catch(const std::exception& e){err=e.what();}NSString* error=S(err);
-        dispatch_async(dispatch_get_main_queue(),^{if(token!=self->_plotToken)return;if(error.length){[self showError:error];return;}self->_lastOptions=o;self->_hasAppliedPlot=YES;self->_comparison=comparison;self->_canvas->plot=std::move(p);self->_canvas.hasOverlay=bool(comparison);
+        dispatch_async(dispatch_get_main_queue(),^{if(token!=self->_plotToken)return;if(error.length){[self showError:error];return;}self->_lastOptions=o;self->_hasAppliedPlot=YES;self->_comparison=comparison;self->_plottedRows=std::make_shared<const std::vector<long long>>(p.acceptedRows);self->_canvas->plot=std::move(p);self->_canvas.hasOverlay=bool(comparison);
             if(comparison){self->_canvas->overlay=comparison->b;self->_detailLabel.stringValue=@"SPECTRUM COMPARISON";self->_detail.string=S(comparison->report);}
-            [self->_canvas resetZoom];if(restoreViewport&&restoredMax>restoredMin&&std::isfinite(restoredMin)&&std::isfinite(restoredMax)){double full=self->_canvas->plot.xMax-self->_canvas->plot.xMin;if(restoredMax-restoredMin>=full*1e-7&&restoredMax-restoredMin<=full*100){self->_canvas.viewMin=restoredMin;self->_canvas.viewMax=restoredMax;}}if(restoreViewport&&std::isfinite(restoredYMin)&&std::isfinite(restoredYMax)&&restoredYMax>restoredYMin){self->_canvas.viewYMin=restoredYMin;self->_canvas.viewYMax=restoredYMax;}self->_canvas.selectedSourceRow=self->_selectedRow+1;self->_plotNote.stringValue=S(self->_canvas->plot.note);self->_plotNote.toolTip=S(self->_canvas->plot.note);[self layout];[self setBusy:NO message:S(data->notes)];[self rememberWorkspace];});
+            [self->_canvas resetZoom];if(restoreViewport&&restoredMax>restoredMin&&std::isfinite(restoredMin)&&std::isfinite(restoredMax)){double full=self->_canvas->plot.xMax-self->_canvas->plot.xMin;if(restoredMax-restoredMin>=full*1e-7&&restoredMax-restoredMin<=full*100){self->_canvas.viewMin=restoredMin;self->_canvas.viewMax=restoredMax;}}if(restoreViewport&&std::isfinite(restoredYMin)&&std::isfinite(restoredYMax)&&restoredYMax>restoredYMin){self->_canvas.viewYMin=restoredYMin;self->_canvas.viewYMax=restoredYMax;}self->_canvas.selectedSourceRow=self->_selectedRow+1;self->_plotNote.stringValue=S(self->_canvas->plot.note);self->_plotNote.toolTip=S(self->_canvas->plot.note);[self layout];[self setBusy:NO message:S(data->notes)];if(self->_tableMode.selectedSegment==1)[self reloadTablePreservingSelection];else[self updatePageControls];[self rememberWorkspace];});
     });
 }
 - (void)chooseOverlay:(id)sender {
@@ -864,34 +868,72 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     NSInteger index=_traceStage.selectedItem.tag;if(!_traceStage.numberOfItems||index<0||index>=(NSInteger)_trace.stages.size())return;auto stage=_trace.stages[index];if(stage.row<0||stage.path.empty())return;
     _pendingOpenPath=S(stage.path);_pendingOpenRow=stage.row;[self openPath:S(stage.path)];
 }
+- (long long)tablePositionForSourceRow:(long long)row {
+    if(!_data||row<0||row>=_data->hdus[_hdu].rows)return -1;
+    if(_tableMode.selectedSegment==0)return row;
+    if(!_plottedRows)return -1;auto it=std::lower_bound(_plottedRows->begin(),_plottedRows->end(),row+1);
+    return it!=_plottedRows->end()&&*it==row+1?it-_plottedRows->begin():-1;
+}
+- (BOOL)pageMatchesTableMode {return _pageFiltered==(_tableMode.selectedSegment==1)&&(!_pageFiltered||_pageIndex==_plottedRows);}
+- (void)updateTableTools {
+    BOOL ready=_data&&!_busy&&!_pageLoading&&!_data->hdus[_hdu].columns.empty();
+    long long total=!_data?0:_tableMode.selectedSegment==1?(_plottedRows?_plottedRows->size():0):_data->hdus[_hdu].rows;
+    _tableMode.enabled=_data&&!_busy&&_hasAppliedPlot;_eventTable.enabled=ready;
+    _previous.enabled=ready&&_page.start>0;_next.enabled=ready&&_page.start+(long long)_page.rows.size()<total;
+    _jump.enabled=ready&&total>0;_go.enabled=_jump.enabled;
+}
 - (void)updatePageControls {
-    if(!_data)return;auto rows=_data->hdus[_hdu].rows;
-    _pageLabel.stringValue=[NSString stringWithFormat:@"%@–%@ of %@",countString(rows?_page.start+1:0),countString(_page.start+_page.rows.size()),countString(rows)];
-    _previous.enabled=_page.start>0;_next.enabled=_page.start+(long long)_page.rows.size()<rows;
+    if(!_data)return;BOOL filtered=_tableMode.selectedSegment==1;auto total=filtered?(_plottedRows?_plottedRows->size():0):_data->hdus[_hdu].rows;
+    BOOL partial=filtered&&_canvas->plot.scanned<uint64_t(_data->hdus[_hdu].rows);
+    _pageLabel.stringValue=[NSString stringWithFormat:@"%@–%@ of %@%@%@",countString(_page.rows.empty()?0:_page.start+1),countString(_page.start+_page.rows.size()),countString(total),filtered?@" plotted":@"",partial?@" · partial scan":@""];
+    _pageLabel.toolTip=filtered?@"Positions within the plotted row list. The Row column and Row # jump retain original source numbers. Zoom does not change this list.":@"Positions in the original source table.";
+    _eventCaption.stringValue=filtered?[NSString stringWithFormat:@"%@ rows · %@%@",countString(total),_comparison?@"plot A":@"applied plot",partial?@" · partial scan":@""]:@"All source rows";
+    _eventCaption.toolTip=_tableMode.toolTip;[self updateTableTools];
+}
+- (void)reloadTablePreservingSelection {
+    long long row=_selectedRow,position=[self tablePositionForSourceRow:row];
+    [self loadPage:position<0?0:(position/250)*250 selectingRow:position<0?-1:row];
+}
+- (void)tableModeChanged:(id)sender {
+    if(!_data||_busy)return;[self reloadTablePreservingSelection];[self rememberWorkspace];
 }
 - (void)selectPlotRow:(long long)sourceRow {
     if(_busy||!_data||_canvas.contentMode!=0||!_canvas->plot.scatter||sourceRow<1||sourceRow>_data->hdus[_hdu].rows)return;
-    long long row=sourceRow-1;_inspectorHidden=NO;_inspectorMode.selectedSegment=1;[self inspectorChanged:nil];[self layout];
-    // Invalidate any older page request even when the newest point is on the current page.
-    ++_pageToken;
-    if(row>=_page.start&&row<_page.start+(long long)_page.rows.size()){
-        [self updatePageControls];NSInteger index=row-_page.start;BOOL alreadySelected=_eventTable.selectedRow==index;[_eventTable selectRowIndexes:[NSIndexSet indexSetWithIndex:index] byExtendingSelection:NO];[_eventTable scrollRowToVisible:index];
+    long long row=sourceRow-1,position=[self tablePositionForSourceRow:row];if(position<0)return;
+    _inspectorHidden=NO;_inspectorMode.selectedSegment=1;[self inspectorChanged:nil];[self layout];
+    // Invalidate an older request even when the newest point is on the loaded page.
+    ++_pageToken;auto it=std::find(_page.sourceRows.begin(),_page.sourceRows.end(),sourceRow);
+    if([self pageMatchesTableMode]&&it!=_page.sourceRows.end()){
+        _pageLoading=NO;[self updatePageControls];NSInteger index=it-_page.sourceRows.begin();BOOL alreadySelected=_eventTable.selectedRow==index;[_eventTable selectRowIndexes:[NSIndexSet indexSetWithIndex:index] byExtendingSelection:NO];[_eventTable scrollRowToVisible:index];
         if(alreadySelected)[self tableViewSelectionDidChange:[NSNotification notificationWithName:NSTableViewSelectionDidChangeNotification object:_eventTable]];
-    }else [self loadPage:(row/250)*250 selectingRow:row];
+    }else [self loadPage:(position/250)*250 selectingRow:row];
 }
-- (void)loadPage:(long long)start {[self loadPage:start selectingRow:start];}
+- (void)loadPage:(long long)start {[self loadPage:start selectingRow:-1];}
 - (void)loadPage:(long long)start selectingRow:(long long)selectedRow {
-    if(!_data)return;auto data=_data;int hi=_hdu;NSUInteger token=++_pageToken;_pageLabel.stringValue=@"Loading table page…";
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{Page page;std::string err;try{page=readPage(*data,hi,start);}catch(const std::exception& e){err=e.what();}NSString* error=S(err);
-        dispatch_async(dispatch_get_main_queue(),^{if(token!=self->_pageToken||data!=self->_data||hi!=self->_hdu)return;if(error.length){[self showError:error];return;}self->_page=std::move(page);[self->_eventTable deselectAll:nil];[self->_eventTable reloadData];
-            [self updatePageControls];
-            if(!self->_page.rows.empty()){NSInteger index=selectedRow-self->_page.start;if(index<0||index>=(NSInteger)self->_page.rows.size())index=0;[self->_eventTable selectRowIndexes:[NSIndexSet indexSetWithIndex:index] byExtendingSelection:NO];[self->_eventTable scrollRowToVisible:index];}
+    if(!_data)return;BOOL filtered=_tableMode.selectedSegment==1;auto index=_plottedRows;if(filtered&&!index)return;
+    auto data=_data;int hi=_hdu;NSUInteger token=++_pageToken;_pageLoading=YES;_pageLabel.stringValue=@"Loading table page…";[self updateTableTools];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{Page page;std::string err;try{page=filtered?readRows(*data,hi,*index,start):readPage(*data,hi,start);}catch(const std::exception& e){err=e.what();}NSString* error=S(err);
+        dispatch_async(dispatch_get_main_queue(),^{if(token!=self->_pageToken||data!=self->_data||hi!=self->_hdu)return;self->_pageLoading=NO;if(error.length){[self updatePageControls];[self showError:error];return;}
+            self->_page=std::move(page);self->_pageFiltered=filtered;self->_pageIndex=filtered?index:nullptr;[self->_eventTable deselectAll:nil];[self->_eventTable reloadData];[self updatePageControls];
+            if(!self->_page.rows.empty()){
+                auto it=std::find(self->_page.sourceRows.begin(),self->_page.sourceRows.end(),selectedRow+1);NSInteger row=it==self->_page.sourceRows.end()?0:it-self->_page.sourceRows.begin();
+                [self->_eventTable selectRowIndexes:[NSIndexSet indexSetWithIndex:row] byExtendingSelection:NO];[self->_eventTable scrollRowToVisible:row];
+            }else{
+                self->_selectedRow=-1;++self->_traceToken;self->_canvas.selectedSourceRow=-1;self->_canvas->geometry=Geometry{};self->_canvas.needsDisplay=YES;
+                self->_trace=TraceResult{};self->_traceView.string=@"No row selected. Choose All rows or adjust the plot filters.";[self->_traceStage removeAllItems];self->_openStage.enabled=NO;self->_traceCards->result=TraceResult{};self->_traceCards.needsDisplay=YES;
+                self->_detailLabel.stringValue=@"NO ROW SELECTED";self->_detail.string=filtered?@"No source rows contributed values to the applied plot. Adjust the filters or switch to All rows.":@"This table has no rows.";
+            }
         });
     });
 }
-- (void)previousPage:(id)sender {[self loadPage:std::max(0LL,_page.start-250)];}
-- (void)nextPage:(id)sender {if(_data)[self loadPage:std::min(_data->hdus[_hdu].rows,_page.start+250)];}
-- (void)jumpPage:(id)sender {if(!_data)return;try{double row=[self optionalNumber:_jump];if(!std::isfinite(row)||std::floor(row)!=row||row<1||row>_data->hdus[_hdu].rows)throw std::runtime_error("Enter an existing 1-based row number");[self loadPage:(long long)row-1];}catch(const std::exception& e){[self showError:S(e.what())];}}
+- (void)previousPage:(id)sender {if(!_pageLoading)[self loadPage:std::max(0LL,_page.start-250)];}
+- (void)nextPage:(id)sender {if(!_pageLoading)[self loadPage:_page.start+250];}
+- (void)jumpPage:(id)sender {
+    if(!_data||_pageLoading)return;try{double row=[self optionalNumber:_jump];if(!std::isfinite(row)||std::floor(row)!=row||row<1||row>_data->hdus[_hdu].rows)throw std::runtime_error("Enter an existing 1-based source row number");
+        long long position=[self tablePositionForSourceRow:(long long)row-1];if(position<0)throw std::runtime_error("This source row is outside the applied plot. Switch to All rows to inspect it.");
+        [self loadPage:position selectingRow:(long long)row-1];
+    }catch(const std::exception& e){[self showError:S(e.what())];}
+}
 - (NSInteger)numberOfRowsInTableView:(NSTableView*)t {return t==_fileTable?_visible.size():_page.rows.size();}
 - (NSView*)tableView:(NSTableView*)t viewForTableColumn:(NSTableColumn*)c row:(NSInteger)row {
     if(t==_fileTable){if(row<0||row>=(NSInteger)_visible.size())return nil;const auto& f=_files[_visible[row]];
@@ -900,12 +942,12 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
         if(![@[@"L0",@"L1A",@"L1B",@"L2"]containsObject:level])level=f.fits?@"FITS":S(std::filesystem::path(f.path).extension().string()).uppercaseString;
         cell.nameLabel.stringValue=S(name);cell.pathLabel.stringValue=S(parent);cell.badge.stringValue=level;cell.toolTip=S(f.relative);cell.glyph.image=[NSImage imageWithSystemSymbolName:f.fits?@"doc.text":@"waveform" accessibilityDescription:nil];return cell;}
     if(row<0||row>=(NSInteger)_page.rows.size())return nil;NSString* value;
-    if([c.identifier isEqualToString:@"row"])value=[NSString stringWithFormat:@"%lld",_page.start+row+1];else {auto index=c.identifier.integerValue;value=index<(NSInteger)_page.rows[row].size()?S(_page.rows[row][index]):@"";}
+    if([c.identifier isEqualToString:@"row"])value=[NSString stringWithFormat:@"%lld",_page.sourceRows[row]];else {auto index=c.identifier.integerValue;value=index<(NSInteger)_page.rows[row].size()?S(_page.rows[row][index]):@"";}
     NSTextField* l=label(value,12,ink());l.font=[NSFont monospacedSystemFontOfSize:12 weight:NSFontWeightRegular];l.toolTip=value;l.lineBreakMode=NSLineBreakByTruncatingTail;return l;
 }
 - (void)tableViewSelectionDidChange:(NSNotification*)note {
-    NSTableView* t=note.object;if(t==_fileTable){if(!_syncingCatalog)[self openSelectedFile:nil];return;}if(t!=_eventTable||!_data||t.selectedRow<0)return;
-    long long row=_page.start+t.selectedRow;_selectedRow=row;_canvas.selectedSourceRow=row+1;_canvas->_hoverLayer.needsDisplay=YES;++_traceToken;auto data=_data;int hi=_hdu;_detailLabel.stringValue=[NSString stringWithFormat:@"ROW %lld · ALL FIELDS",row+1];
+    NSTableView* t=note.object;if(t==_fileTable){if(!_syncingCatalog)[self openSelectedFile:nil];return;}if(t!=_eventTable||!_data||t.selectedRow<0||t.selectedRow>=(NSInteger)_page.sourceRows.size())return;
+    long long row=_page.sourceRows[t.selectedRow]-1;_selectedRow=row;_canvas.selectedSourceRow=row+1;_canvas->_hoverLayer.needsDisplay=YES;++_traceToken;auto data=_data;int hi=_hdu;_detailLabel.stringValue=[NSString stringWithFormat:@"ROW %lld · ALL FIELDS",row+1];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{std::string details;Geometry g;try{details=rowDetail(*data,hi,row);g=readGeometry(*data,hi,row);}catch(const std::exception& e){details=e.what();}
         NSString* content=S(details);dispatch_async(dispatch_get_main_queue(),^{if(data!=self->_data||hi!=self->_hdu||row!=self->_selectedRow)return;self->_detail.string=content;self->_canvas->geometry=std::move(g);self->_canvas.needsDisplay=YES;});
     });
@@ -930,13 +972,13 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     if(!_hasAppliedPlot)return nil;
     if(o.x<0||o.x>=(int)h.columns.size()||o.y<0||o.y>=(int)h.columns.size())return nil;
     auto number=[](double n){return std::isfinite(n)?[NSString stringWithFormat:@"%.17g",n]:@"";};
-    return @{@"path":S(_data->path),@"hdu":@(_hdu),@"hduName":S(h.name),@"mode":@(int(o.mode)),@"x":S(h.columns[o.x].name),@"y":S(h.columns[o.y].name),@"reduction":@(int(o.reduction)),@"rowAxis":@(o.seriesByRow),@"bins":@(o.bins),@"eventClass":@(o.eventClass),@"clean":@(o.cleanOnly),@"valueMin":number(o.valueMin),@"valueMax":number(o.valueMax),@"timeMin":number(o.timeMin),@"timeMax":number(o.timeMax),@"logY":@(_canvas.logY),@"viewMin":@(_canvas.viewMin),@"viewMax":@(_canvas.viewMax),@"viewYMin":@(_canvas.viewYMin),@"viewYMax":@(_canvas.viewYMax)};
+    return @{@"path":S(_data->path),@"hdu":@(_hdu),@"hduName":S(h.name),@"mode":@(int(o.mode)),@"x":S(h.columns[o.x].name),@"y":S(h.columns[o.y].name),@"reduction":@(int(o.reduction)),@"rowAxis":@(o.seriesByRow),@"bins":@(o.bins),@"eventClass":@(o.eventClass),@"clean":@(o.cleanOnly),@"valueMin":number(o.valueMin),@"valueMax":number(o.valueMax),@"timeMin":number(o.timeMin),@"timeMax":number(o.timeMax),@"logY":@(_canvas.logY),@"viewMin":@(_canvas.viewMin),@"viewMax":@(_canvas.viewMax),@"viewYMin":@(_canvas.viewYMin),@"viewYMax":@(_canvas.viewYMax),@"plottedRows":@(_tableMode.selectedSegment==1)};
 }
 - (void)rememberWorkspace {
     if(!_restoreEnabled)return;NSDictionary* state=[self workspaceSnapshot];if(state)[_preferences setObject:state forKey:@"WorkspaceV1"];[self saveWindowLayout];
 }
 - (void)restoreWorkspaceControls:(NSDictionary*)state {
-    const auto& h=_data->hdus[_hdu];_restoreViewport=NO;
+    const auto& h=_data->hdus[_hdu];_restoreViewport=NO;_tableMode.selectedSegment=[state[@"plottedRows"]isKindOfClass:NSNumber.class]&&[state[@"plottedRows"]boolValue]?1:0;
     for(NSString* key in @[@"mode",@"reduction",@"bins",@"eventClass",@"rowAxis",@"clean",@"logY",@"viewMin",@"viewMax"])if(![state[key]isKindOfClass:NSNumber.class])return;
     if(![state[@"x"]isKindOfClass:NSString.class]||![state[@"y"]isKindOfClass:NSString.class])return;
     int x=findColumn(h,[state[@"x"]UTF8String]),y=findColumn(h,[state[@"y"]UTF8String]);NSInteger mode=[state[@"mode"]integerValue],reduce=[state[@"reduction"]integerValue],bins=[state[@"bins"]integerValue],eventClass=[state[@"eventClass"]integerValue];
@@ -1114,7 +1156,8 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     [self savePreview:@"05-compact-navigation.png"];[_window setFrame:original display:NO];[self layout];
 }
 - (void)checkRestoredToolsState {
-    const auto& o=_lastOptions;if(o.mode!=Mode::Series||!o.seriesByRow||o.reduction!=Reduction::Sum||o.eventClass!=0||o.valueMin!=500||o.timeMin!=100||o.timeMax!=450||!_sidebarHidden||_inspectorHidden)throw std::runtime_error("Workspace controls or layout were not restored");
+    const auto& o=_lastOptions;if(_tableMode.selectedSegment!=1||!_pageFiltered||_pageIndex!=_plottedRows)throw std::runtime_error("Plotted-row table mode was not restored");
+    if(o.mode!=Mode::Series||!o.seriesByRow||o.reduction!=Reduction::Sum||o.eventClass!=0||o.valueMin!=500||o.timeMin!=100||o.timeMax!=450||!_sidebarHidden||_inspectorHidden)throw std::runtime_error("Workspace controls or layout were not restored");
     double yspan=_canvas->plot.yMax-_canvas->plot.yMin;if(std::abs(_canvas.viewYMin-(_canvas->plot.yMin+.1*yspan))>1e-8||std::abs(_canvas.viewYMax-(_canvas->plot.yMin+.8*yspan))>1e-8)throw std::runtime_error("Workspace Y viewport was not restored");
     double span=_canvas->plot.xMax-_canvas->plot.xMin;if(std::abs(_canvas.viewMin-(_canvas->plot.xMin+.2*span))>1e-8||std::abs(_canvas.viewMax-(_canvas->plot.xMin+.7*span))>1e-8)throw std::runtime_error("Workspace viewport was not restored");
     NSRect expected=NSRectFromString([_preferences stringForKey:@"TestExpectedFrame"]);if(_window.screen)expected=[_window constrainFrameRect:expected toScreen:_window.screen];if(std::abs(_window.frame.size.width-expected.size.width)>1||std::abs(_window.frame.size.height-expected.size.height)>1)throw std::runtime_error("Window size was not restored");
@@ -1144,6 +1187,25 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     }else if(_smokeStep==11){
         if(_selectedRow!=301)return;
         if(_page.start!=250||_eventTable.selectedRow!=51||_canvas.selectedSourceRow!=302||[_pageLabel.stringValue containsString:@"Loading"])throw std::runtime_error("Rapid clicks must preserve the newest original row");
+        [_class selectItemAtIndex:1];_tableMode.selectedSegment=1;[NSApp sendAction:_tableMode.action to:_tableMode.target from:_tableMode];[NSApp sendAction:_class.action to:_class.target from:_class];_smokeStep=20;
+    }else if(_smokeStep==20){
+        if(!_plottedRows||_plottedRows->size()!=900||!_pageFiltered||_pageIndex!=_plottedRows||_page.rows.size()!=250)throw std::runtime_error("Plotted rows must track applied class filtering");
+        for(auto row:_page.sourceRows)if(row%4==1)throw std::runtime_error("Filtered table included an excluded original row");
+        if([self tablePositionForSourceRow:0]!=-1||![_pageLabel.stringValue containsString:@"900 plotted"])throw std::runtime_error("Excluded jump rows and filtered row count");
+        [NSApp sendAction:_next.action to:_next.target from:_next];_smokeStep=21;
+    }else if(_smokeStep==21){
+        if(_page.start!=250||_page.sourceRows.front()!=335||_page.sourceRows.size()!=250)throw std::runtime_error("Filtered paging must use match positions and show original source rows");
+        NSTextField* rowCell=(NSTextField*)[self tableView:_eventTable viewForTableColumn:_eventTable.tableColumns.firstObject row:0];if(![rowCell.stringValue isEqualToString:@"335"])throw std::runtime_error("Visible Row column must not renumber filtered results");
+        _jump.stringValue=@"1000";[NSApp sendAction:_go.action to:_go.target from:_go];_smokeStep=22;
+    }else if(_smokeStep==22){
+        if(_selectedRow!=999||_page.sourceRows[_eventTable.selectedRow]!=1000)throw std::runtime_error("Filtered jump must select the original row");
+        [self testClickPoint:0];_smokeStep=23;
+    }else if(_smokeStep==23){
+        if(_selectedRow!=1||_page.start!=0||_page.sourceRows[_eventTable.selectedRow]!=2)throw std::runtime_error("Point click must select its source row inside the filtered list");
+        [self savePreview:@"07-plotted-rows.png"];
+        _tableMode.selectedSegment=0;[NSApp sendAction:_tableMode.action to:_tableMode.target from:_tableMode];_tableMode.selectedSegment=1;[NSApp sendAction:_tableMode.action to:_tableMode.target from:_tableMode];_smokeStep=24;
+    }else if(_smokeStep==24){
+        if(!_pageFiltered||_pageIndex!=_plottedRows||_tableMode.selectedSegment!=1||_page.sourceRows.front()!=2||!_eventTable.enabled)throw std::runtime_error("Rapid table-mode changes must keep the newest row list");
         [_seriesAxis selectItemAtIndex:1];[_reduce selectItemAtIndex:2];[_class selectItemAtIndex:1];_min.stringValue=@"500";_tmin.stringValue=@"100";_tmax.stringValue=@"450";
         [NSApp sendAction:_seriesAxis.action to:_seriesAxis.target from:_seriesAxis];_smokeStep=1;
     }else if(_smokeStep==1){
@@ -1152,11 +1214,18 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
         [self testClickPoint:_canvas->plot.x.size()/2];_smokeStep=12;
     }else if(_smokeStep==12){
         long long expected=_canvas->plot.sourceRows[_canvas->plot.x.size()/2]-1;if(_selectedRow!=expected)return;
-        if(_page.start+_eventTable.selectedRow!=expected||_canvas.selectedSourceRow!=expected+1)throw std::runtime_error("Filtered point click must use its original source row");
+        if(_page.sourceRows[_eventTable.selectedRow]!=expected+1||_canvas.selectedSourceRow!=expected+1)throw std::runtime_error("Filtered point click must use its original source row");
+        if(!_tableRowsChecked){_tableRowsChecked=YES;_min.stringValue=@"99999999";[self updatePlot:nil];_smokeStep=25;return;}
         [_window setContentSize:NSMakeSize(1320,860)];_sidebarHidden=YES;_inspectorHidden=NO;[self layout];double span=_canvas->plot.xMax-_canvas->plot.xMin;_canvas.viewMin=_canvas->plot.xMin+.2*span;_canvas.viewMax=_canvas->plot.xMin+.7*span;double yspan=_canvas->plot.yMax-_canvas->plot.yMin;_canvas.viewYMin=_canvas->plot.yMin+.1*yspan;_canvas.viewYMax=_canvas->plot.yMin+.8*yspan;_canvas.needsDisplay=YES;[_canvas displayIfNeeded];
         [_preferences setObject:NSStringFromRect(_window.frame) forKey:@"TestExpectedFrame"];_toolsWorkspace=[self workspaceSnapshot];if(!_toolsWorkspace)throw std::runtime_error("Workspace snapshot missing");
         auto point=_canvas->_targets.at(_canvas->_targets.size()/2).point;_canvas.hover=point;_canvas.needsDisplay=YES;[self savePreview:@"02-filtered-row-hover.png"];[self saveTestFigure:@"filtered-rows"];
         _tmin.stringValue=@"";_tmax.stringValue=@"";[_mode selectItemAtIndex:0];[NSApp sendAction:_mode.action to:_mode.target from:_mode];_smokeStep=2;
+    }else if(_smokeStep==25){
+        if(!_page.rows.empty()||!_plottedRows->empty()||_selectedRow!=-1||_go.enabled||_next.enabled||_previous.enabled||![_detail.string containsString:@"No source rows"]||!_trace.stages.empty()||_openStage.enabled||!_canvas->geometry.x.empty())throw std::runtime_error("Empty plotted-row table must clear selection and disable paging");
+        [self savePreview:@"08-no-plotted-rows.png"];_tableMode.selectedSegment=0;[NSApp sendAction:_tableMode.action to:_tableMode.target from:_tableMode];_smokeStep=26;
+    }else if(_smokeStep==26){
+        if(_pageFiltered||_page.sourceRows.front()!=1||_page.rows.size()!=250||_selectedRow!=0)throw std::runtime_error("All rows must remain available after an empty filtered plot");
+        _min.stringValue=@"500";_tableMode.selectedSegment=1;[NSApp sendAction:_tableMode.action to:_tableMode.target from:_tableMode];[self updatePlot:nil];_smokeStep=1;
     }else if(_smokeStep==2){
         _log.state=NSControlStateValueOn;[self toggleLog:nil];[self loadOverlayPath:S(_data->path)];_smokeStep=3;
     }else if(_smokeStep==3){
@@ -1172,17 +1241,21 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
         _normalize.state=NSControlStateValueOn;[self overlayNormalizationChanged:nil];_smokeStep=4;
     }else if(_smokeStep==4){
         if(!_comparison||!_comparison->normalized)return;[self saveTestFigure:@"normalized-overlay"];
-        _overlayData.reset();_comparison.reset();_canvas.hasOverlay=NO;[self restoreWorkspaceControls:_toolsWorkspace];[self updatePlot:nil];_smokeStep=5;
+        if(!_pageFiltered||_plottedRows->size()!=_canvas->plot.accepted||![_eventCaption.stringValue containsString:@"plot A"])throw std::runtime_error("Histogram/overlay table must show contributing rows of source A");
+        _overlayData.reset();_comparison.reset();_canvas.hasOverlay=NO;[self restoreWorkspaceControls:_toolsWorkspace];[_mode selectItemAtIndex:1];[self updatePlot:nil];_smokeStep=27;
+    }else if(_smokeStep==27){
+        if(_canvas->plot.scatter||!_canvas->plot.sourceRows.empty()||_plottedRows->empty()||_plottedRows->size()!=_canvas->plot.accepted||!_pageFiltered)throw std::runtime_error("Event-count bins must retain unique contributing rows without claiming per-bin row identity");
+        [self savePreview:@"09-lightcurve-rows.png"];[self restoreWorkspaceControls:_toolsWorkspace];[self updatePlot:nil];_smokeStep=5;
     }else{
         [self rememberWorkspace];[_preferences synchronize];[self checkRestoredToolsState];
-        [@"PASS: native click selects original rows across table pages and rapid requests; rectangle zoom on both axes, reverse/Shift/clamped/tiny/cancel gestures, Pan, Back/Reset, log zoom, compact controls; native hover target/action shows full-precision plotted values and original row/time provenance; filtered row provenance; bin hover with overlays; PNG/PDF snapshots of time/row/log-overlay/normalized-overlay plots; viewer note separation; saved applied workspace and X/Y viewport.\n" writeToFile:[_smokeDir stringByAppendingPathComponent:@"ui-result.txt"] atomically:YES encoding:NSUTF8StringEncoding error:nil];[NSApp terminate:nil];return;
+        [@"PASS: filtered row paging/jumps, source identities, rapid table-mode changes, empty-result recovery, aggregate/overlay source-A rows, and table-mode restoration; native click selects original rows across table pages and rapid requests; rectangle zoom on both axes, reverse/Shift/clamped/tiny/cancel gestures, Pan, Back/Reset, log zoom, compact controls; native hover target/action shows full-precision plotted values and original row/time provenance; filtered row provenance; bin hover with overlays; PNG/PDF snapshots of time/row/log-overlay/normalized-overlay plots; viewer note separation; saved applied workspace and X/Y viewport.\n" writeToFile:[_smokeDir stringByAppendingPathComponent:@"ui-result.txt"] atomically:YES encoding:NSUTF8StringEncoding error:nil];[NSApp terminate:nil];return;
     }
 }
 - (void)smokeTick {
     if(++_smokeTicks>300){[@"FAIL: asynchronous UI check timed out" writeToFile:[_smokeDir stringByAppendingPathComponent:@"ui-result.txt"] atomically:YES encoding:NSUTF8StringEncoding error:nil];[NSApp terminate:nil];return;}
     BOOL ready=_data&&!_busy&&!_files.empty()&&!_page.rows.empty()&&!_canvas->plot.x.empty()&&_detail.string.length&&[_detail.string rangeOfString:@"Select a row"].location==NSNotFound;
     try {
-        if(_plotToolsTest){if(_data&&!_busy&&!_page.rows.empty()&&!_canvas->plot.x.empty())[self plotToolsTestTick];if(!NSApp.running)return;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,200*NSEC_PER_MSEC),dispatch_get_main_queue(),^{[self smokeTick];});return;}
+        if(_plotToolsTest){if(_data&&!_busy&&!_pageLoading&&_hasAppliedPlot)[self plotToolsTestTick];if(!NSApp.running)return;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,200*NSEC_PER_MSEC),dispatch_get_main_queue(),^{[self smokeTick];});return;}
         if(ready&&!_smokePrepared){
             PlotOptions startup;startup.mode=Mode::Series;startup.x=findColumn(_data->hdus[_hdu],"ENERGY");
             auto expected=makePlot(*_data,_hdu,startup);
