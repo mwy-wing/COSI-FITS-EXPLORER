@@ -15,6 +15,11 @@ static void write(const std::filesystem::path& p,const std::vector<uint8_t>& b){
 int main(){
     auto root=std::filesystem::temp_directory_path()/std::filesystem::path("cosi-viewer-tests-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));std::filesystem::create_directories(root);
     try{
+        const double largest=std::numeric_limits<double>::max();
+        auto absent=summarizeValues({NaN,INFINITY});require(absent.count==0&&absent.nonFinite==2&&std::isnan(absent.mean)&&std::isnan(absent.median),"Empty summaries must not invent zero statistics");
+        std::vector<double> unsorted={9,1,4,2};auto original=unsorted;auto stats=summarizeValues(unsorted);require(stats.count==4&&stats.min==1&&stats.max==9&&stats.mean==4&&stats.median==3&&unsorted==original,"Exact even median, mean and range without reordering source points");
+        stats=summarizeValues({0,NaN,INFINITY,-2,4});require(stats.count==3&&stats.nonFinite==2&&stats.median==0&&std::abs(stats.mean-2./3)<1e-15,"Finite zero, rejected inputs and odd median");
+        stats=summarizeValues({-largest,largest});require(stats.mean==0&&stats.median==0,"Opposite extreme values must not overflow statistics");stats=summarizeValues({largest,largest,largest});require(stats.mean==largest&&stats.median==largest,"Large repeated finite values must retain a finite mean");
         // Independently hand-encoded SPP + one 44-bit normal hit: ROI 37, fast=1, ADC=2361, TAC=10867.
         auto raw=root/"normal.bin";std::vector<uint8_t> bytes={0x08,0xdd,0xc0,0x00,0x00,0x14,0,0,0,123,0,0,0,40,0,0,0,0,0x04,0x06,0x02};
         uint64_t bits=(uint64_t(37)<<29)|(uint64_t(1)<<28)|(uint64_t(2361)<<14)|10867;for(int shift=40;shift>=0;shift-=8)bytes.push_back(uint8_t((bits<<4)>>shift));
@@ -49,15 +54,15 @@ int main(){
         fails([&]{readRows(*a,1,{0},0);});fails([&]{readRows(*a,1,{4},0);});
         require(readRows(*d,0,{1},0).rows==page.rows,"Sparse packet rows use the same decoder as full pages");
         auto image=readImage(*a,2);require(image.width==2&&image.height==2&&image.min==1&&image.max==4&&std::isnan(image.values[2]),"Image pixels/nulls and scale");
-        PlotOptions o;o.x=2;auto p=makePlot(*a,1,o);require(p.values==3&&p.accepted==2,"Only active hits, no padded energies");require(p.xMin==100&&p.xMax==400,"Energy range");require(p.acceptedRows==std::vector<long long>({1,3}),"Contributing histogram rows are unique despite multiple hits");require(p.sourceRows.empty()&&p.sourceTimes.empty(),"Aggregate bins must not claim source-row identity");require(std::accumulate(p.y.begin(),p.y.end(),0.)==3,"Histogram conserves counts");
-        o.reduction=Reduction::Sum;p=makePlot(*a,1,o);require(p.values==2&&p.xMin==300&&p.xMax==400,"Sum active hits");
-        o.mode=Mode::LightCurve;o.reduction=Reduction::Elements;p=makePlot(*a,1,o);require(p.values==2&&p.acceptedRows==std::vector<long long>({1,3}),"Light curve counts and indexes events once, not hits");
+        PlotOptions o;o.x=2;auto p=makePlot(*a,1,o);require(p.values==3&&p.accepted==2,"Only active hits, no padded energies");require(p.xMin==100&&p.xMax==400,"Energy range");require(p.acceptedRows==std::vector<long long>({1,3}),"Contributing histogram rows are unique despite multiple hits");require(p.summary.count==3&&p.summary.min==100&&p.summary.max==400&&p.summary.median==200&&p.emptyRows==1&&p.summaryLabel=="ENERGY [keV]","Histogram summary uses active energy values before binning, with empty rows separate");require(p.sourceRows.empty()&&p.sourceTimes.empty(),"Aggregate bins must not claim source-row identity");require(std::accumulate(p.y.begin(),p.y.end(),0.)==3,"Histogram conserves counts");
+        o.reduction=Reduction::Sum;p=makePlot(*a,1,o);require(p.values==2&&p.xMin==300&&p.xMax==400&&p.summary.mean==350&&p.summary.median==350,"Summed active-hit statistics");
+        o.mode=Mode::LightCurve;o.reduction=Reduction::Elements;p=makePlot(*a,1,o);require(p.values==2&&p.acceptedRows==std::vector<long long>({1,3}),"Light curve counts and indexes events once, not hits");require(p.summary.mean==250&&p.summary.median==250&&p.summaryLabel=="ENERGY [keV]","Light-curve statistics summarize the selected gate value, not its timestamp");
         o.mode=Mode::Histogram;o.eventClass=0;p=makePlot(*a,1,o);require(p.accepted==1&&p.values==2,"Class filtering");
         o.eventClass=-1;o.timeMin=25;p=makePlot(*a,1,o);require(p.accepted==1&&p.values==1,"Time filtering");
         o.timeMin=NaN;o.valueMin=200;o.valueMax=300;p=makePlot(*a,1,o);require(p.values==1&&p.acceptedRows==std::vector<long long>({1}),"Inclusive value gate retains its parent source row");
         o.valueMin=500;o.valueMax=100;fails([&]{makePlot(*a,1,o);});
         o=PlotOptions{};o.x=2;o.timeMin=std::nextafter(10.0,20.0);p=makePlot(*a,1,o);require(p.values==1&&p.settings.find("time=[10.000000000000002,")!=std::string::npos,"Recorded filter precision preserves the applied boundary");
-        o=PlotOptions{};o.x=2;o.rowLimit=1;p=makePlot(*a,1,o);require(p.scanned==1&&p.note.find("PARTIAL")!=std::string::npos&&p.acceptedRows==std::vector<long long>({1}),"Partial scan row index must stop at the scan boundary");
+        o=PlotOptions{};o.x=2;o.rowLimit=1;p=makePlot(*a,1,o);require(p.partial&&p.summary.count==2&&p.scanned==1&&p.note.find("PARTIAL")!=std::string::npos&&p.acceptedRows==std::vector<long long>({1}),"Partial scan row index must stop at the scan boundary");
         o.rowLimit=2000000;o.valueMin=10000;p=makePlot(*a,1,o);require(p.acceptedRows.empty()&&p.accepted==0,"Empty selections have no contributing rows");
         // Column values are paired with source time or original row numbers, never counts.
         o=PlotOptions{};o.mode=Mode::Series;o.x=1;o.seriesByRow=true;p=makePlot(*a,1,o);
@@ -72,7 +77,7 @@ int main(){
         o.reduction=Reduction::First;p=makePlot(*a,1,o);require(p.y==std::vector<double>({100,400}),"First active Y hit");
         o.timeMin=25;p=makePlot(*a,1,o);require(p.sourceRows==std::vector<long long>({3})&&p.sourceTimes==std::vector<double>({30}),"Filtered reduced point provenance");require(p.x==std::vector<double>({3})&&p.y==std::vector<double>({400}),"Time gate on row-axis series");
         o=PlotOptions{};o.mode=Mode::Series;o.x=6;o.seriesByRow=true;p=makePlot(*a,1,o);
-        require(p.x==std::vector<double>({1,2})&&p.y==std::vector<double>({1,0}),"Null Y omitted, finite zero preserved");
+        require(p.x==std::vector<double>({1,2})&&p.y==std::vector<double>({1,0}),"Null Y omitted, finite zero preserved");require(p.summary.count==2&&p.summary.nonFinite==1&&p.summary.median==.5,"Null selected values remain separate from finite zero");
         o.cleanOnly=true;p=makePlot(*a,1,o);require(p.acceptedRows==std::vector<long long>({1}),"Contributing rows exclude quality flags and null values");o.cleanOnly=false;
         auto noTime=*a;noTime.hdus[1].columns[0].name="DEVICE_TICKS";o.x=1;p=makePlot(noTime,1,o);require(p.values==3,"Row axis works without a time column");
         require(p.sourceRows==std::vector<long long>({1,2,3})&&std::isnan(p.sourceTimes[0])&&p.timeLabel=="Time unavailable","Absent time is unavailable, not inferred from row");
@@ -80,6 +85,10 @@ int main(){
         o=PlotOptions{};o.mode=Mode::Series;o.x=findColumn(d->hdus[0],"PHA");p=makePlot(*d,0,o);
         require(p.x==std::vector<double>({123})&&p.y==std::vector<double>({2361}),"Raw GeD time/value pairs");
         o.seriesByRow=true;p=makePlot(*d,0,o);require(p.x==std::vector<double>({1})&&p.y==std::vector<double>({2361}),"Raw packet row/value pairs");
+        int tableType=0;fits_open_diskfile(&f,fit.string().c_str(),READWRITE,&s);fits_movabs_hdu(f,2,&tableType,&s);unsigned char tooMany=4;fits_write_col(f,TBYTE,2,1,1,1,&tooMany,&s);fits_close_file(f,&s);ck(s);
+        o=PlotOptions{};o.x=2;p=makePlot(*a,1,o);require(p.invalidRows==1&&p.emptyRows==1&&p.summary.count==1&&p.summary.min==400,"Invalid hit counts, empty rows and valid values are distinct");
+        fits_open_diskfile(&f,fit.string().c_str(),READWRITE,&s);fits_movabs_hdu(f,2,&tableType,&s);unsigned char two=2;float badEnergy=NAN;fits_write_col(f,TBYTE,2,1,1,1,&two,&s);fits_write_col(f,TFLOAT,3,1,2,1,&badEnergy,&s);fits_close_file(f,&s);ck(s);
+        o.reduction=Reduction::Sum;p=makePlot(*a,1,o);require(p.summary.count==1&&p.summary.nonFinite==1&&p.emptyRows==1&&p.summary.mean==400,"A sum with a null active input is an invalid reduced value, not a zero or empty row");
         std::filesystem::remove_all(root);std::cout<<"PASS: packet framing/bit decoding, unknown APIDs, malformed input, PX bit arrays, exact 64-bit identifiers, logical/null columns, image pixels, hit counts, histogram totals, event/time/value filters, partial-scan labeling\n";return 0;
     }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<"\nFixtures: "<<root<<"\n";return 1;}
 }

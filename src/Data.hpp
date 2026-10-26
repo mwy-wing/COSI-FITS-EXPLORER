@@ -33,8 +33,15 @@ struct PlotOptions {
     double valueMin = NaN, valueMax = NaN, timeMin = NaN, timeMax = NaN;
     long long rowLimit = 2000000;
 };
+struct ValueSummary {
+    uint64_t count = 0, nonFinite = 0;
+    double min = NaN, max = NaN, mean = NaN, median = NaN;
+};
+ValueSummary summarizeValues(const std::vector<double>& values);
 struct Plot {
-    std::string title, xLabel, yLabel, note, settings, timeLabel;
+    std::string title, xLabel, yLabel, note, settings, timeLabel, summaryLabel, summaryNote;
+    ValueSummary summary;
+    uint64_t emptyRows = 0, invalidRows = 0;
     // Point provenance is empty for aggregated histograms/light curves. Rows are 1-based.
     std::vector<long long> sourceRows;
     std::vector<double> sourceTimes;
@@ -44,7 +51,7 @@ struct Plot {
     double xMin = 0, xMax = 1, yMin = 0, yMax = 1;
     double mean = NaN;
     uint64_t scanned = 0, accepted = 0, values = 0, skipped = 0;
-    bool scatter = false;
+    bool scatter = false, partial = false;
 };
 struct Image { long width = 0, height = 0; std::vector<double> values; double min = 0, max = 1; std::string note; };
 struct Geometry { std::vector<double> x, y, z, energy, sequence; std::string unit, summary; };

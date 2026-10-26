@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+<title id="title">COSI Explorer</title>
+<desc id="desc">An ivory C and three orange spectrum bars on an ink-blue tile. Original flat vector artwork.</desc>
+<rect x="96" y="96" width="832" height="832" rx="186" fill="#193746"/>
+<rect x="476" y="504" width="52" height="120" rx="4" fill="#EE9B52"/>
+<rect x="564" y="420" width="52" height="204" rx="4" fill="#EE9B52"/>
+<rect x="652" y="476" width="52" height="148" rx="4" fill="#EE9B52"/>
+<path d="M696 334 C652 282 595 252 514 252 C372 252 268 362 268 512 C268 662 372 772 514 772 C595 772 652 742 696 690" fill="none" stroke="#F6F1E7" stroke-width="84" stroke-linecap="round"/>
+</svg>

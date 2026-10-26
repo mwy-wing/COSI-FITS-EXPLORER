@@ -246,6 +246,20 @@ std::string rowDetail(const Dataset& d,int hi,long long row) {
         std::ifstream in(d.path,std::ios::binary);out<<"\nHEX PAYLOAD (includes primary header)\n"<<hexDump(packetBytes(in,d.packets[row]));
     }return out.str();
 }
+ValueSummary summarizeValues(const std::vector<double>& values) {
+    ValueSummary result;std::vector<double> finite;finite.reserve(values.size());
+    for(double value:values){if(std::isfinite(value))finite.push_back(value);else ++result.nonFinite;}
+    result.count=finite.size();if(finite.empty())return result;
+    auto bounds=std::minmax_element(finite.begin(),finite.end());result.min=*bounds.first;result.max=*bounds.second;
+    // Scale only near overflow; compensation preserves small contributions in ordinary data.
+    double peak=std::max(std::abs(result.min),std::abs(result.max));
+    double scale=peak>(std::numeric_limits<double>::max()/result.count)*.5?peak:1.;
+    double sum=0,compensation=0;for(double value:finite){double corrected=value/scale-compensation,next=sum+corrected;compensation=(next-sum)-corrected;sum=next;}
+    double average=sum/result.count;result.mean=scale==1?average:std::clamp(average,-1.,1.)*scale;
+    auto middle=finite.begin()+finite.size()/2;std::nth_element(finite.begin(),middle,finite.end());result.median=*middle;
+    if(finite.size()%2==0){double low=*std::max_element(finite.begin(),middle),high=*middle;result.median=std::signbit(low)==std::signbit(high)?low+(high-low)*.5:(low+high)*.5;}
+    return result;
+}
 Plot makePlot(const Dataset& d,int hi,const PlotOptions& o) {
     const auto& h=d.hdus.at(hi);if(h.columns.empty()) throw std::runtime_error("Select a table HDU to plot");
     if(o.x<0||o.x>=(int)h.columns.size()||!h.columns[o.x].numeric) throw std::runtime_error("Choose a numeric column");
@@ -260,11 +274,12 @@ Plot makePlot(const Dataset& d,int hi,const PlotOptions& o) {
     bool series=o.mode==Mode::Series;
     if((o.mode==Mode::LightCurve||(series&&!o.seriesByRow)||std::isfinite(o.timeMin)||std::isfinite(o.timeMax))&&tc<0) throw std::runtime_error("No supported time column in this table; use Row number for X");
     std::unique_ptr<Fits> f;if(d.fits){f=std::make_unique<Fits>(d.path);f->move(h.number);}std::ifstream in;if(!d.fits) in.open(d.path,std::ios::binary);
-    Plot p;p.timeLabel=tc>=0?label(h.columns[tc]):"Time unavailable";
+    Plot p;p.timeLabel=tc>=0?label(h.columns[tc]):"Time unavailable";p.summaryLabel=label(h.columns[o.x]);
+    p.summaryNote=o.mode==Mode::LightCurve?"First accepted gate value per counted event.":o.mode==Mode::Scatter?"Selected X column; only accepted X/Y pairs.":"Selected column after applied array reduction.";
     auto bound=[](double n){if(!std::isfinite(n))return std::string("unbounded");std::ostringstream out;out<<std::setprecision(17)<<n;return out.str();};
     std::string axes=series?"; X="+std::string(o.seriesByRow?"Row number (1-based)":label(h.columns[tc]))+"; Y="+label(h.columns[o.x]):"; X="+h.columns[o.x].name;
     p.settings="HDU="+h.name+axes+"; reduction="+(o.reduction==Reduction::Elements?"all elements":o.reduction==Reduction::First?"first element":"sum row (active hits where declared)")+(series?std::string{}:"; bins="+std::to_string(o.bins))+"; value=["+bound(o.valueMin)+", "+bound(o.valueMax)+"]; time=["+bound(o.timeMin)+", "+bound(o.timeMax)+"]; EVENTCLASS="+(o.eventClass<0?"all":std::to_string(o.eventClass))+"; cleanOnly="+(o.cleanOnly?"true":"false");
-    std::vector<double> xs,ys;auto limit=std::min(h.rows,o.rowLimit);bool cap=false;
+    std::vector<double> xs,ys,gateValues;auto limit=std::min(h.rows,o.rowLimit);bool cap=false;
     for(long long r=0;r<limit;++r) {
         ++p.scanned;Raw raw;if(!d.fits) raw=decode(d.packets[r],packetBytes(in,d.packets[r]));
         auto get=[&](int c){if(c<0)return std::vector<double>{};return d.fits?numbers(f->f,h.columns[c],c,r+1):rawValues(d.packets[r],raw,c);};
@@ -277,29 +292,31 @@ Plot makePlot(const Dataset& d,int hi,const PlotOptions& o) {
         // Only hit fields are clipped by NUMHIT/NUMSTRIPHIT, never arbitrary vectors (e.g. STATTEST).
         const auto& name=h.columns[o.x].name;
         bool hitField=name=="ENERGY"||name=="ENERGY_ERR"||name=="X"||name=="Y"||name=="Z"||name=="X_ERR"||name=="Y_ERR"||name=="Z_ERR"||name=="SEQHIT"||name=="DETID"||name=="STRIPID"||name=="SIDEID"||name=="FASTTIME"||name=="PHA"||name=="TAC"||name=="HITTYPE"||name=="READOUT_ID";
-        if(active>=0&&hitField&&(h.columns[o.x].type<0||h.columns[o.x].repeat!=1)) {double n=first(active);if(!std::isfinite(n)||n<0||n>v.size()){++p.skipped;continue;}v.resize((size_t)n);}
+        if(active>=0&&hitField&&(h.columns[o.x].type<0||h.columns[o.x].repeat!=1)) {double n=first(active);if(!std::isfinite(n)||n<0||n>v.size()){++p.skipped;++p.invalidRows;continue;}v.resize((size_t)n);}
+        if(v.empty())++p.emptyRows;
         if(o.reduction==Reduction::First&&v.size()>1)v.resize(1);
-        else if(o.reduction==Reduction::Sum) {bool good=!v.empty()&&std::all_of(v.begin(),v.end(),[](double n){return std::isfinite(n);});v=good?std::vector<double>{std::accumulate(v.begin(),v.end(),0.0)}:std::vector<double>{};}
+        else if(o.reduction==Reduction::Sum) {bool good=!v.empty()&&std::all_of(v.begin(),v.end(),[](double n){return std::isfinite(n);});if(!v.empty()&&!good){++p.summary.nonFinite;++p.skipped;}v=good?std::vector<double>{std::accumulate(v.begin(),v.end(),0.0)}:std::vector<double>{};}
         bool accepted=false;double y=NaN;
         if(o.mode==Mode::Scatter) {auto vv=get(o.y);if(!vv.empty())y=vv[0];if(v.size()>1)v.resize(1);}
         for(double value:v) {
-            if(!std::isfinite(value)){++p.skipped;continue;}
+            if(!std::isfinite(value)){++p.skipped;++p.summary.nonFinite;continue;}
             if((std::isfinite(o.valueMin)&&value<o.valueMin)||(std::isfinite(o.valueMax)&&value>o.valueMax))continue;
             double x=series?(o.seriesByRow?double(r+1):time):o.mode==Mode::LightCurve?time:value;if(!std::isfinite(x)||(o.mode==Mode::Scatter&&!std::isfinite(y))){++p.skipped;continue;}
             if(xs.size()>=5000000){cap=true;break;}xs.push_back(x);if(series)ys.push_back(value);else if(o.mode==Mode::Scatter)ys.push_back(y);
             if(series||o.mode==Mode::Scatter){p.sourceRows.push_back(r+1);p.sourceTimes.push_back(time);}accepted=true;
             // A light curve counts rows/events once, even when the gate column contains multiple hits.
-            if(o.mode==Mode::LightCurve)break;
+            if(o.mode==Mode::LightCurve){gateValues.push_back(value);break;}
         }
         if(accepted){++p.accepted;p.acceptedRows.push_back(r+1);}if(cap)break;
     }
-    p.values=xs.size();p.scatter=o.mode==Mode::Scatter||series;
-    const auto& meanValues=series?ys:xs;
-    if(!meanValues.empty())p.mean=std::accumulate(meanValues.begin(),meanValues.end(),0.0)/meanValues.size();
+    p.values=xs.size();p.scatter=o.mode==Mode::Scatter||series;p.partial=p.scanned<uint64_t(h.rows)||cap;
+    std::string scopeNote;if(p.scanned<uint64_t(h.rows))scopeNote+=" · PARTIAL: first "+std::to_string(p.scanned)+" of "+std::to_string(h.rows)+" rows";if(cap)scopeNote+=" · PARTIAL: collected-value limit reached";
+    p.settings+="; rowLimit="+std::to_string(o.rowLimit)+"; valueLimit=5000000";
+    uint64_t rejected=p.summary.nonFinite;p.summary=summarizeValues(series?ys:o.mode==Mode::LightCurve?gateValues:xs);p.summary.nonFinite+=rejected;p.mean=p.summary.mean;
     p.xLabel=series?(o.seriesByRow?"Row number (1-based)":label(h.columns[tc])):o.mode==Mode::LightCurve?label(h.columns[tc]):label(h.columns[o.x]);
     p.yLabel=series?label(h.columns[o.x]):p.scatter?label(h.columns[o.y])+" (first element)":o.mode==Mode::LightCurve?"Events / time bin":"Values / bin";
     p.title=series?label(h.columns[o.x])+" vs "+p.xLabel:o.mode==Mode::LightCurve?"Event light curve":p.scatter?"Column comparison":label(h.columns[o.x])+" distribution";
-    if(xs.empty()) {p.note="No finite values match these filters. Scanned "+std::to_string(p.scanned)+" rows.";return p;}
+    if(xs.empty()) {p.note="No finite values match these filters. Scanned "+std::to_string(p.scanned)+" rows."+scopeNote;return p;}
     auto range=std::minmax_element(xs.begin(),xs.end());p.xMin=*range.first;p.xMax=*range.second;
     if(o.mode==Mode::Histogram) {if(std::isfinite(o.valueMin))p.xMin=o.valueMin;if(std::isfinite(o.valueMax))p.xMax=o.valueMax;}
     if(o.mode==Mode::LightCurve) {if(std::isfinite(o.timeMin))p.xMin=o.timeMin;if(std::isfinite(o.timeMax))p.xMax=o.timeMax;}
@@ -309,7 +326,7 @@ Plot makePlot(const Dataset& d,int hi,const PlotOptions& o) {
         for(int b=0;b<n;++b)p.x[b]=p.xMin+(b+0.5)*width;
         for(auto x:xs) {auto b=std::clamp<int>(int((x-p.xMin)/width),0,n-1);p.y[b]++;}p.yMax=*std::max_element(p.y.begin(),p.y.end())*1.08;}
     p.note=std::to_string(p.accepted)+" / "+std::to_string(p.scanned)+" rows selected · "+std::to_string(p.values)+" plotted values";
-    if(p.scanned<uint64_t(h.rows))p.note+=" · PARTIAL: first "+std::to_string(p.scanned)+" of "+std::to_string(h.rows)+" rows";
+    p.note+=scopeNote;
     if(p.skipped)p.note+=" · "+std::to_string(p.skipped)+" invalid/empty values skipped";
     if(series)p.note+=" · Y uses selected array reduction · "+std::string(o.seriesByRow?"original table row numbers, not EVENTID":"stored time, no clock correction");
     else if(p.scatter)p.note+=" · X uses selected reduction; Y uses first element";

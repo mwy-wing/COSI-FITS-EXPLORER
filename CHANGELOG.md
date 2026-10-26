@@ -2,6 +2,10 @@
 
 ## 0.1.1 — in development
 
+- Summary inspector with column range, median, mean, collected/input counts, and full-precision copy text.
+- Explicit partial-scan/collection scope and limits in plot settings and summaries.
+- Flat original vector C/spectrum icon, reproducible native icon builder, and matching README banner.
+
 - All rows / Plotted rows table views, with original row IDs, filtered paging/jumps, and restored table choice.
 - Contributing-row lists for point, histogram, event-count, and source-A overlay plots, with empty-result recovery.
 
