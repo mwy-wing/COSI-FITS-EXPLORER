@@ -136,9 +136,12 @@ static NSTextView* reader() {
 @property(weak) PlotCanvas* canvas;
 @end
 struct PlotTarget {NSPoint point;size_t index;};
+struct PlotViewport {double xMin,xMax,yMin,yMax;};
 @interface PlotCanvas : NSView {
 @public Plot plot, overlay;Image image;Geometry geometry;
     std::vector<PlotTarget> _targets;PlotHoverLayer* _hoverLayer;NSInteger _hoverIndex;
+    std::vector<PlotViewport> _history;PlotViewport _dragViewport;
+    BOOL _gestureActive,_didDrag,_boxGesture;NSPoint _dragCurrent;double _scrollTimestamp;
 }
 @property BOOL exporting;
 @property(copy) NSString* exportCaption;
@@ -150,10 +153,20 @@ struct PlotTarget {NSPoint point;size_t index;};
 @property double viewMax;
 @property NSPoint hover;
 @property NSPoint dragStart;
-@property double dragMin;
-@property double dragMax;
+@property double viewYMin;
+@property double viewYMax;
+@property NSInteger interactionTool; // Inspect, Pan, Box zoom
+@property BOOL interactionsEnabled;
+@property long long selectedSourceRow;
+@property(copy) void (^onSelectRow)(long long);
+@property(copy) void (^onViewportChange)(void);
 @property(strong) NSTrackingArea* tracking;
-- (void)resetZoom;
+- (void)resetZoom; // A new plot clears navigation history.
+- (void)resetViewport;
+- (void)goBack;
+- (BOOL)canResetViewport;
+- (void)cancelInteraction;
+- (PlotViewport)viewport;
 - (NSRect)chartRect;
 - (NSString*)hoverDetailsAtPoint:(NSPoint)point;
 - (void)drawHover;
@@ -164,11 +177,41 @@ struct PlotTarget {NSPoint point;size_t index;};
     if((self=[super initWithFrame:frame])){
         self.wantsLayer=YES;_hoverLayer=[[PlotHoverLayer alloc]initWithFrame:self.bounds];_hoverLayer.canvas=self;
         _hoverLayer.autoresizingMask=NSViewWidthSizable|NSViewHeightSizable;_hoverLayer.wantsLayer=YES;
-        [self addSubview:_hoverLayer];_hoverIndex=-1;
+        [self addSubview:_hoverLayer];_hoverIndex=-1;self.interactionsEnabled=YES;self.selectedSourceRow=-1;
     }return self;
 }
 - (BOOL)isFlipped{return YES;}
-- (void)resetZoom {self.viewMin=plot.xMin;self.viewMax=plot.xMax;self.hover=NSMakePoint(-1,-1);_hoverIndex=-1;_hoverLayer.needsDisplay=YES;self.needsDisplay=YES;}
+- (BOOL)acceptsFirstResponder{return YES;}
+- (PlotViewport)viewport {return {self.viewMin,self.viewMax,self.viewYMin,self.viewYMax};}
+- (void)viewportChanged {
+    _targets.clear();self.hover=NSMakePoint(-1,-1);_hoverIndex=-1;_hoverLayer.needsDisplay=YES;self.needsDisplay=YES;
+    if(self.onViewportChange)self.onViewportChange();
+}
+- (void)applyViewport:(PlotViewport)v {self.viewMin=v.xMin;self.viewMax=v.xMax;self.viewYMin=v.yMin;self.viewYMax=v.yMax;[self viewportChanged];}
+- (void)pushViewport {[self pushViewport:[self viewport]];}
+- (void)pushViewport:(PlotViewport)v {
+    _scrollTimestamp=0;
+    if(!_history.empty()){auto last=_history.back();if(v.xMin==last.xMin&&v.xMax==last.xMax&&v.yMin==last.yMin&&v.yMax==last.yMax)return;}
+    if(_history.size()==64)_history.erase(_history.begin());_history.push_back(v);
+}
+- (void)resetZoom {
+    _gestureActive=NO;_history.clear();_scrollTimestamp=0;self.selectedSourceRow=-1;
+    [self applyViewport:{plot.xMin,plot.xMax,plot.yMin,plot.yMax}];
+}
+- (BOOL)canResetViewport {return self.viewMin!=plot.xMin||self.viewMax!=plot.xMax||self.viewYMin!=plot.yMin||self.viewYMax!=plot.yMax;}
+- (void)resetViewport {
+    if(!self.interactionsEnabled||self.contentMode!=0||plot.x.empty())return;
+    [self cancelInteraction];if(![self canResetViewport])return;[self pushViewport];[self applyViewport:{plot.xMin,plot.xMax,plot.yMin,plot.yMax}];
+}
+- (void)goBack {
+    if(!self.interactionsEnabled||self.contentMode!=0)return;[self cancelInteraction];if(_history.empty())return;
+    auto v=_history.back();_history.pop_back();_scrollTimestamp=0;[self applyViewport:v];
+}
+- (void)cancelInteraction {
+    if(_gestureActive&&_didDrag&&!_boxGesture)[self applyViewport:_dragViewport];
+    _gestureActive=NO;_didDrag=NO;_hoverLayer.needsDisplay=YES;
+}
+- (void)keyDown:(NSEvent*)event {if(event.keyCode==53)[self cancelInteraction];else[super keyDown:event];}
 - (NSRect)chartRect {return NSMakeRect(68,68,std::max(20.,self.bounds.size.width-98),std::max(20.,self.bounds.size.height-134-(self.exporting?self.captionHeight+24:0)));}
 - (void)updateTrackingAreas {
     [super updateTrackingAreas];if(self.tracking)[self removeTrackingArea:self.tracking];
@@ -176,16 +219,50 @@ struct PlotTarget {NSPoint point;size_t index;};
 }
 - (void)mouseMoved:(NSEvent*)e {self.hover=[self convertPoint:e.locationInWindow fromView:nil];_hoverLayer.needsDisplay=YES;}
 - (void)mouseExited:(NSEvent*)e {self.hover=NSMakePoint(-1,-1);_hoverLayer.needsDisplay=YES;}
-- (void)mouseDown:(NSEvent*)e {if(e.clickCount==2){[self resetZoom];return;}self.dragStart=[self convertPoint:e.locationInWindow fromView:nil];self.dragMin=self.viewMin;self.dragMax=self.viewMax;}
-- (void)mouseDragged:(NSEvent*)e {
-    if(self.contentMode!=0)return;NSPoint p=[self convertPoint:e.locationInWindow fromView:nil];double dx=(p.x-self.dragStart.x)/[self chartRect].size.width*(self.dragMax-self.dragMin);
-    self.viewMin=self.dragMin-dx;self.viewMax=self.dragMax-dx;self.needsDisplay=YES;
+- (void)mouseDown:(NSEvent*)e {
+    [self cancelInteraction];if(!self.interactionsEnabled||self.contentMode!=0||plot.x.empty())return;
+    NSPoint p=[self convertPoint:e.locationInWindow fromView:nil];if(!NSPointInRect(p,[self chartRect]))return;
+    [self.window makeFirstResponder:self];if(e.clickCount==2){[self resetViewport];return;}
+    self.dragStart=p;_dragCurrent=p;_dragViewport=[self viewport];_gestureActive=YES;_didDrag=NO;
+    _boxGesture=self.interactionTool==2||(e.modifierFlags&NSEventModifierFlagShift);_scrollTimestamp=0;
 }
-- (void)scrollWheel:(NSEvent*)e {
-    if(self.contentMode!=0||plot.x.empty())return;NSRect r=[self chartRect];NSPoint m=[self convertPoint:e.locationInWindow fromView:nil];
-    double frac=std::clamp((m.x-r.origin.x)/r.size.width,0.,1.),range=self.viewMax-self.viewMin,factor=std::exp(std::clamp(e.scrollingDeltaY*0.015,-0.5,0.5));
+- (void)mouseDragged:(NSEvent*)e {
+    if(!_gestureActive||!self.interactionsEnabled)return;
+    NSPoint p=[self convertPoint:e.locationInWindow fromView:nil];NSRect r=[self chartRect];
+    if(!_didDrag&&std::hypot(p.x-self.dragStart.x,p.y-self.dragStart.y)<4)return;
+    _didDrag=YES;
+    if(_boxGesture){_dragCurrent=NSMakePoint(std::clamp(p.x,NSMinX(r),NSMaxX(r)),std::clamp(p.y,NSMinY(r),NSMaxY(r)));self.hover=NSMakePoint(-1,-1);_hoverLayer.needsDisplay=YES;return;}
+    double dx=(p.x-self.dragStart.x)/r.size.width*(_dragViewport.xMax-_dragViewport.xMin);
+    [self applyViewport:{_dragViewport.xMin-dx,_dragViewport.xMax-dx,_dragViewport.yMin,_dragViewport.yMax}];
+}
+- (void)mouseUp:(NSEvent*)e {
+    if(!_gestureActive)return;BOOL dragged=_didDrag,box=_boxGesture;_gestureActive=NO;_didDrag=NO;_hoverLayer.needsDisplay=YES;
+    if(!self.interactionsEnabled)return;
+    if(dragged&&box){
+        NSRect r=[self chartRect];double left=std::min(self.dragStart.x,_dragCurrent.x),right=std::max(self.dragStart.x,_dragCurrent.x),top=std::min(self.dragStart.y,_dragCurrent.y),bottom=std::max(self.dragStart.y,_dragCurrent.y);
+        if(right-left<6||bottom-top<6)return;
+        auto v=_dragViewport;BOOL log=self.logY&&!plot.scatter;
+        double lo=log?std::log10(1+std::max(0.,v.yMin)):v.yMin,hi=log?std::log10(1+std::max(0.,v.yMax)):v.yMax;
+        auto yAt=[&](double y){double value=hi-(y-r.origin.y)/r.size.height*(hi-lo);return log?std::pow(10,value)-1:value;};
+        PlotViewport next={v.xMin+(left-r.origin.x)/r.size.width*(v.xMax-v.xMin),v.xMin+(right-r.origin.x)/r.size.width*(v.xMax-v.xMin),yAt(bottom),yAt(top)};
+        if(!std::isfinite(next.yMin)||!std::isfinite(next.yMax)||next.xMax<=next.xMin||next.yMax<=next.yMin)return;
+        [self pushViewport];[self applyViewport:next];return;
+    }
+    if(dragged&&!box&&(self.viewMin!=_dragViewport.xMin||self.viewMax!=_dragViewport.xMax)){
+        [self pushViewport:_dragViewport];if(self.onViewportChange)self.onViewportChange();
+    }
+    if(!dragged&&!box&&self.interactionTool==0&&plot.scatter){
+        [self displayIfNeeded];NSPoint p=[self convertPoint:e.locationInWindow fromView:nil];[self hoverDetailsAtPoint:p];
+        if(_hoverIndex>=0&&size_t(_hoverIndex)<plot.sourceRows.size()&&self.onSelectRow)self.onSelectRow(plot.sourceRows[_hoverIndex]);
+    }
+}
+- (void)scrollWheel:(NSEvent*)e {[self zoomXAtPoint:[self convertPoint:e.locationInWindow fromView:nil] delta:e.scrollingDeltaY];}
+- (void)zoomXAtPoint:(NSPoint)m delta:(double)delta {
+    if(!self.interactionsEnabled||_gestureActive||self.contentMode!=0||plot.x.empty()||!std::isfinite(delta)||delta==0)return;NSRect r=[self chartRect];if(!NSPointInRect(m,r))return;
+    double frac=(m.x-r.origin.x)/r.size.width,range=self.viewMax-self.viewMin,factor=std::exp(std::clamp(delta*0.015,-0.5,0.5));
     double next=range*factor;if(next<(plot.xMax-plot.xMin)*1e-7||next>(plot.xMax-plot.xMin)*100)return;
-    double x=self.viewMin+frac*range;self.viewMin=x-frac*next;self.viewMax=self.viewMin+next;self.needsDisplay=YES;
+    double now=NSProcessInfo.processInfo.systemUptime;if(now-_scrollTimestamp>.35)[self pushViewport];_scrollTimestamp=now;
+    double x=self.viewMin+frac*range;[self applyViewport:{x-frac*next,x+(1-frac)*next,self.viewYMin,self.viewYMax}];
 }
 - (void)drawRect:(NSRect)dirty {
     _targets.clear();_hoverLayer.needsDisplay=YES;
@@ -197,7 +274,7 @@ struct PlotTarget {NSPoint point;size_t index;};
     if(plot.x.empty()){text(S(plot.note.empty()?"Inspect FITS tables and COSI telemetry directly from disk.":plot.note),NSMakeRect(30,80,self.bounds.size.width-60,90),13,muted());return;}
     NSRect r=[self chartRect];double xmin=self.viewMin,xmax=self.viewMax;if(xmax<=xmin){xmin=plot.xMin;xmax=plot.xMax;}
     BOOL useLog=self.logY&&!plot.scatter;auto trans=[&](double y){return useLog?std::log10(1+std::max(0.,y)):y;};
-    double ymin=trans(plot.yMin),ymax=trans(plot.yMax);if(ymax<=ymin)ymax=ymin+1;
+    double ymin=trans(self.viewYMin),ymax=trans(self.viewYMax);if(ymax<=ymin)ymax=ymin+1;
     auto px=[&](double x){return r.origin.x+(x-xmin)/(xmax-xmin)*r.size.width;};
     auto py=[&](double y){return r.origin.y+r.size.height-(trans(y)-ymin)/(ymax-ymin)*r.size.height;};
     for(int i=0;i<=5;++i){double f=i/5.;CGFloat x=r.origin.x+f*r.size.width,y=r.origin.y+r.size.height-f*r.size.height;
@@ -211,16 +288,17 @@ struct PlotTarget {NSPoint point;size_t index;};
         // Fill markers individually: one compound path of 50k overlapping circles
         // makes CoreGraphics spend minutes rasterizing dense telemetry plots.
         CGContextRef context=NSGraphicsContext.currentContext.CGContext;CGContextSetFillColorWithColor(context,accent().CGColor);
-        size_t visible=0;for(double x:plot.x)if(x>=xmin&&x<=xmax)++visible;
+        auto visiblePoint=[&](size_t i){return plot.x[i]>=xmin&&plot.x[i]<=xmax&&plot.y[i]>=self.viewYMin&&plot.y[i]<=self.viewYMax;};
+        size_t visible=0;for(size_t i=0;i<plot.x.size();++i)if(visiblePoint(i))++visible;
         size_t stride=std::max<size_t>(1,(visible+49999)/50000),seen=0;
-        for(size_t i=0;i<plot.x.size();++i)if(plot.x[i]>=xmin&&plot.x[i]<=xmax&&seen++%stride==0){
+        for(size_t i=0;i<plot.x.size();++i)if(visiblePoint(i)&&seen++%stride==0){
             NSPoint point=NSMakePoint(px(plot.x[i]),py(plot.y[i]));
             CGContextFillRect(context,CGRectMake(point.x-1.25,point.y-1.25,2.5,2.5));
             if(!self.exporting&&point.x>=NSMinX(r)&&point.x<=NSMaxX(r)&&point.y>=NSMinY(r)&&point.y<=NSMaxY(r))_targets.push_back({point,i});
         }
     }else {double width=(plot.xMax-plot.xMin)/plot.x.size();NSBezierPath* p=[NSBezierPath bezierPath];BOOL first=YES;
-        for(size_t i=0;i<plot.x.size();++i){double a=px(plot.x[i]-width/2),b=px(plot.x[i]+width/2),y=py(plot.y[i]);if(first){[p moveToPoint:NSMakePoint(a,NSMaxY(r))];first=NO;}[p lineToPoint:NSMakePoint(a,y)];[p lineToPoint:NSMakePoint(b,y)];}
-        [p lineToPoint:NSMakePoint(px(plot.x.back()+width/2),NSMaxY(r))];[p closePath];
+        for(size_t i=0;i<plot.x.size();++i){double a=px(plot.x[i]-width/2),b=px(plot.x[i]+width/2),y=py(plot.y[i]);if(first){[p moveToPoint:NSMakePoint(a,py(0))];first=NO;}[p lineToPoint:NSMakePoint(a,y)];[p lineToPoint:NSMakePoint(b,y)];}
+        [p lineToPoint:NSMakePoint(px(plot.x.back()+width/2),py(0))];[p closePath];
         // Opaque pale stops keep PDF shadings consistent with the on-screen white chart.
         NSGradient* gradient=[[NSGradient alloc]initWithStartingColor:[accent()blendedColorWithFraction:.80 ofColor:panel()] endingColor:[accent()blendedColorWithFraction:.975 ofColor:panel()]];[gradient drawInBezierPath:p angle:90];[accent()setStroke];p.lineWidth=1.8;[p stroke];
     }
@@ -237,7 +315,7 @@ struct PlotTarget {NSPoint point;size_t index;};
         line(NSMakePoint(22,self.bounds.size.height-self.captionHeight-16),NSMakePoint(self.bounds.size.width-22,self.bounds.size.height-self.captionHeight-16),edge());
         [self.exportCaption drawInRect:NSMakeRect(22,self.bounds.size.height-self.captionHeight-8,self.bounds.size.width-44,self.captionHeight) withAttributes:@{NSFontAttributeName:[NSFont systemFontOfSize:11],NSForegroundColorAttributeName:ink(),NSParagraphStyleAttributeName:style}];
     }else{
-        NSString* hint=@"Hover: inspect values   ·   Scroll: zoom X   ·   Drag: pan   ·   Double-click: reset";
+        NSString* hint=plot.scatter?@"Click: select row   ·   Scroll: zoom X   ·   Shift-drag: box zoom   ·   Esc: cancel":@"Hover: inspect bin   ·   Scroll: zoom X   ·   Shift-drag: box zoom   ·   Esc: cancel";
         if(plot.scatter&&plot.x.size()>50000)hint=@"Hover: displayed points   ·   display thinned to ≤50k points   ·   Scroll: zoom X";
         text(hint,NSMakeRect(22,self.bounds.size.height-20,self.bounds.size.width-44,15),9,muted());
     }
@@ -262,6 +340,14 @@ struct PlotTarget {NSPoint point;size_t index;};
     return details;
 }
 - (void)drawHover {
+    if(self.exporting||self.contentMode!=0)return;
+    if(plot.scatter&&self.selectedSourceRow>0)for(const auto& target:_targets)if(target.index<plot.sourceRows.size()&&plot.sourceRows[target.index]==self.selectedSourceRow){
+        [RGB(219,143,42)setStroke];NSBezierPath* ring=[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(target.point.x-5,target.point.y-5,10,10)];ring.lineWidth=2;[ring stroke];
+    }
+    if(_gestureActive&&_boxGesture&&_didDrag){
+        NSRect box=NSMakeRect(std::min(self.dragStart.x,_dragCurrent.x),std::min(self.dragStart.y,_dragCurrent.y),std::abs(self.dragStart.x-_dragCurrent.x),std::abs(self.dragStart.y-_dragCurrent.y));
+        NSBezierPath* path=[NSBezierPath bezierPathWithRect:box];[[accent()colorWithAlphaComponent:.12]setFill];[path fill];[accent()setStroke];path.lineWidth=1.5;CGFloat dash[]={5,3};[path setLineDash:dash count:2 phase:0];[path stroke];return;
+    }
     NSString* details=[self hoverDetailsAtPoint:self.hover];if(!details.length)return;
     NSRect r=[self chartRect];NSPoint selected=self.hover;
     if(plot.scatter){for(const auto& target:_targets)if(target.index==size_t(_hoverIndex)){selected=target.point;break;}}
@@ -346,6 +432,7 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     NSTextField *_bins,*_min,*_max,*_tmin,*_tmax,*_jump;
     NSButton *_rootButton,*_openButton,*_plotButton,*_log,*_clean,*_previous,*_next,*_go,*_export;
     PlotCanvas* _canvas;NSProgressIndicator* _spinner;
+    NSSegmentedControl* _plotInteraction;NSButton *_zoomBack,*_zoomReset;
     NSString* _smokeDir;NSInteger _smokeStep,_smokeTicks;
     BOOL _columnTest,_smokePrepared,_plotToolsTest,_restoredToolsRun;NSDictionary* _toolsWorkspace;NSString* _preferencesSuite;NSInteger _columnStep,_columnStarted;Plot _expectedColumnPlot;
     std::shared_ptr<Dataset> _overlayData;std::shared_ptr<Comparison> _comparison;TraceResult _trace;
@@ -362,7 +449,7 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     NSImageView *_brandGlyph,*_fileGlyph;
     TraceCards* _traceCards;NSScrollView* _traceCardsScroll;
     BOOL _sidebarHidden,_inspectorHidden,_syncingCatalog,_restoreEnabled,_restoreViewport,_hasAppliedPlot;
-    NSUserDefaults* _preferences;NSDictionary* _pendingWorkspace;double _restoredMin,_restoredMax;
+    NSUserDefaults* _preferences;NSDictionary* _pendingWorkspace;double _restoredMin,_restoredMax,_restoredYMin,_restoredYMax;
 }
 - (void)layout;
 - (void)openPath:(NSString*)path;
@@ -407,7 +494,14 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     _normalize=[NSButton checkboxWithTitle:@"Unit area" target:self action:@selector(overlayNormalizationChanged:)];_clearOverlay=button(@"Clear",self,@selector(clearOverlay:));_clearOverlay.enabled=NO;
     _overlayLabel=label(@"",10,muted());_overlayLabel.lineBreakMode=NSLineBreakByTruncatingMiddle;
     _class=[self popup:@[@"All classes",@"Compton (0)",@"Photoabs. (1)"] action:@selector(updatePlot:)];_clean=[NSButton checkboxWithTitle:@"Clean only" target:self action:@selector(updatePlot:)];
-    _canvas=[PlotCanvas new];[_canvas resetZoom];_plotNote=label(@"Plots read source values; original files remain unchanged.",10,muted());
+    _canvas=[PlotCanvas new];[_canvas resetZoom];
+    _plotInteraction=[NSSegmentedControl segmentedControlWithLabels:@[@"Inspect",@"Pan",@"Box zoom"] trackingMode:NSSegmentSwitchTrackingSelectOne target:self action:@selector(plotInteractionChanged:)];_plotInteraction.selectedSegment=0;
+    _plotInteraction.toolTip=@"Inspect: click a displayed point to select its source row; drag to pan. Pan: drag without selecting. Box zoom: drag a rectangle on both axes. Shift-drag also box zooms; Escape cancels.";
+    _zoomBack=button(@"← Back",self,@selector(backPlotZoom:));_zoomBack.toolTip=@"Return to the previous plot view (⌘[).";
+    _zoomReset=button(@"Reset",self,@selector(resetPlotZoom:));_zoomReset.toolTip=@"Fit the full plot (⌘0 or double-click). Back can undo a reset.";
+    _canvas.onSelectRow=^(long long row){[weak selectPlotRow:row];};_canvas.onViewportChange=^{[weak updatePlotTools];[weak rememberWorkspace];};
+    for(NSView* v in @[_plotInteraction,_zoomBack,_zoomReset])[_surface addSubview:v];
+    _plotNote=label(@"Plots read source values; original files remain unchanged.",10,muted());
     _eventTable=[self tableWithIdentifier:@"events"];_eventTable.rowHeight=29;_eventTable.usesAlternatingRowBackgroundColors=YES;_eventTable.style=NSTableViewStyleFullWidth;_eventScroll=scroll(_eventTable);
     _detail=reader();_detailScroll=scroll(_detail);_detailScroll.hasHorizontalScroller=NO;_detailLabel=label(@"SELECTED ROW",10,accent());
     _previous=button(@"←",self,@selector(previousPage:));_next=button(@"→",self,@selector(nextPage:));_pageLabel=label(@"Table preview · 250 rows per page",10,muted());
@@ -501,12 +595,19 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     NSMenuItem* viewItem=[NSMenuItem new];viewItem.title=@"View";[menu addItem:viewItem];NSMenu* vm=[[NSMenu alloc]initWithTitle:@"View"];viewItem.submenu=vm;
     NSMenuItem* sidebar=[vm addItemWithTitle:@"Toggle Library" action:@selector(toggleSidebar:) keyEquivalent:@"l"];sidebar.target=self;sidebar.keyEquivalentModifierMask=NSEventModifierFlagCommand|NSEventModifierFlagOption;
     NSMenuItem* inspector=[vm addItemWithTitle:@"Toggle Inspector" action:@selector(toggleInspector:) keyEquivalent:@"i"];inspector.target=self;inspector.keyEquivalentModifierMask=NSEventModifierFlagCommand|NSEventModifierFlagOption;
+    NSMenuItem* back=[vm addItemWithTitle:@"Previous Plot View" action:@selector(backPlotZoom:) keyEquivalent:@"["];back.target=self;
     NSMenuItem* reset=[vm addItemWithTitle:@"Reset Plot Zoom" action:@selector(resetPlotZoom:) keyEquivalent:@"0"];reset.target=self;
     NSMenuItem* windowItem=[NSMenuItem new];windowItem.title=@"Window";[menu addItem:windowItem];NSMenu* wm=[[NSMenu alloc]initWithTitle:@"Window"];windowItem.submenu=wm;
     [wm addItemWithTitle:@"Minimize" action:@selector(performMiniaturize:) keyEquivalent:@"m"];[wm addItemWithTitle:@"Zoom" action:@selector(performZoom:) keyEquivalent:@""];NSApp.windowsMenu=wm;
     NSApp.mainMenu=menu;
 }
-- (void)resetPlotZoom:(id)sender {[_canvas resetZoom];}
+- (void)plotInteractionChanged:(id)sender {[_canvas cancelInteraction];_canvas.interactionTool=_plotInteraction.selectedSegment;}
+- (void)backPlotZoom:(id)sender {[_canvas goBack];}
+- (void)resetPlotZoom:(id)sender {[_canvas resetViewport];}
+- (void)updatePlotTools {
+    BOOL available=!_busy&&_tabs.selectedSegment==0&&_canvas.contentMode==0&&!_canvas->plot.x.empty();
+    _canvas.interactionsEnabled=available;_plotInteraction.enabled=available;_zoomBack.enabled=available&&!_canvas->_history.empty();_zoomReset.enabled=available&&[_canvas canResetViewport];
+}
 - (BOOL)validateToolbarItem:(NSToolbarItem*)item {
     if([item.itemIdentifier isEqualToString:@"export"])return !_canvas->plot.x.empty();
     if([item.itemIdentifier isEqualToString:@"compare"])return _data&&!_data->hdus[_hdu].columns.empty();
@@ -528,9 +629,12 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     _metrics.frame=NSMakeRect(x,86,w,74);_metrics.needsDisplay=YES;
     _tabs.frame=NSMakeRect(x-2,178,std::min(454.,w-257),29);_hduChoice.frame=NSMakeRect(x+w-243,177,246,30);
     CGFloat chartH=std::clamp((H-200)*.47,270.,360.);
-    _canvas.frame=explore?NSMakeRect(x,top,cw,chartH):NSMakeRect(x,top,w,H-top-42);
-    _plotNote.frame=NSMakeRect(x+2,top+chartH+9,cw-4,20);
-    CGFloat titleY=top+chartH+42,tableY=titleY+31,tableH=std::max(90.,H-tableY-67);
+    _plotInteraction.frame=NSMakeRect(x-2,top,210,26);_zoomBack.frame=NSMakeRect(x+216,top-2,78,30);_zoomReset.frame=NSMakeRect(x+298,top-2,70,30);
+    BOOL tools=explore&&_canvas.contentMode==0;for(NSView* v in @[_plotInteraction,_zoomBack,_zoomReset])v.hidden=!tools;
+    CGFloat plotTop=top+(tools?34:0);chartH=std::min(chartH,std::max(220.,H-plotTop-230));[self updatePlotTools];
+    _canvas.frame=explore?NSMakeRect(x,plotTop,cw,chartH):NSMakeRect(x,top,w,H-top-42);
+    _plotNote.frame=NSMakeRect(x+2,plotTop+chartH+9,cw-4,20);
+    CGFloat titleY=plotTop+chartH+42,tableY=titleY+31,tableH=std::max(90.,H-tableY-67);
     _eventTitle.frame=NSMakeRect(x,titleY,130,23);_eventCaption.frame=NSMakeRect(x+140,titleY+3,std::max(30.,cw-140),19);
     _eventScroll.frame=NSMakeRect(x,tableY,cw,tableH);
     _previous.frame=NSMakeRect(x-3,H-54,80,29);_next.frame=NSMakeRect(x+80,H-54,62,29);
@@ -582,7 +686,7 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     if(!_data)return;for(size_t row=0;row<_visible.size();++row)if(_files[_visible[row]].path==_data->path){_syncingCatalog=YES;[_fileTable selectRowIndexes:[NSIndexSet indexSetWithIndex:row] byExtendingSelection:NO];[_fileTable scrollRowToVisible:row];_syncingCatalog=NO;break;}
 }
 - (void)setBusy:(BOOL)busy message:(NSString*)message {
-    _busy=busy;_plotButton.enabled=!busy;_status.toolTip=message;
+    _busy=busy;if(busy)[_canvas cancelInteraction];[self updatePlotTools];_plotButton.enabled=!busy;_status.toolTip=message;
     _status.stringValue=!busy&&_data&&[message isEqualToString:S(_data->notes)]&&![message containsString:@"WARNING"]?@"Read only  ·  Original units and timestamps":message;
     if(busy)[_spinner startAnimation:nil];else[_spinner stopAnimation:nil];
 }
@@ -694,7 +798,7 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
         auto bins=(o.mode==Mode::Series||o.mode==Mode::Scatter)?128:[self optionalNumber:_bins];if(!std::isfinite(bins)||bins<8||bins>4096||std::floor(bins)!=bins)throw std::runtime_error("Bins must be an integer from 8 to 4096");o.bins=int(bins);
         o.valueMin=[self optionalNumber:_min];o.valueMax=[self optionalNumber:_max];o.timeMin=[self optionalNumber:_tmin];o.timeMax=[self optionalNumber:_tmax];o.eventClass=_class.enabled?int(_class.indexOfSelectedItem)-1:-1;o.cleanOnly=_clean.enabled&&_clean.state==NSControlStateValueOn;
     }catch(const std::exception& e){[self showError:S(e.what())];return;}
-    NSUInteger token=++_plotToken;BOOL restoreViewport=_restoreViewport;_restoreViewport=NO;double restoredMin=_restoredMin,restoredMax=_restoredMax;auto data=_data,other=_overlayData;int hi=_hdu,bh=other?int(_overlayHDU.selectedItem.tag):-1;BOOL normalized=_normalize.state==NSControlStateValueOn;
+    NSUInteger token=++_plotToken;BOOL restoreViewport=_restoreViewport;_restoreViewport=NO;double restoredMin=_restoredMin,restoredMax=_restoredMax,restoredYMin=_restoredYMin,restoredYMax=_restoredYMax;auto data=_data,other=_overlayData;int hi=_hdu,bh=other?int(_overlayHDU.selectedItem.tag):-1;BOOL normalized=_normalize.state==NSControlStateValueOn;
     if(other&&bh<0){[self showError:@"Choose a comparison HDU before updating the overlay."];return;}
     _plotNote.stringValue=@"Updating plot…";
     [self setBusy:YES message:other?@"Computing spectra on a shared bin grid…":@"Computing plot from source rows…"];
@@ -702,7 +806,7 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
         try{if(other){comparison=std::make_shared<Comparison>(compareSpectra(*data,hi,o,*other,bh,normalized));p=comparison->a;}else p=makePlot(*data,hi,o);}catch(const std::exception& e){err=e.what();}NSString* error=S(err);
         dispatch_async(dispatch_get_main_queue(),^{if(token!=self->_plotToken)return;if(error.length){[self showError:error];return;}self->_lastOptions=o;self->_hasAppliedPlot=YES;self->_comparison=comparison;self->_canvas->plot=std::move(p);self->_canvas.hasOverlay=bool(comparison);
             if(comparison){self->_canvas->overlay=comparison->b;self->_detailLabel.stringValue=@"SPECTRUM COMPARISON";self->_detail.string=S(comparison->report);}
-            [self->_canvas resetZoom];if(restoreViewport&&restoredMax>restoredMin&&std::isfinite(restoredMin)&&std::isfinite(restoredMax)){double full=self->_canvas->plot.xMax-self->_canvas->plot.xMin;if(restoredMax-restoredMin>=full*1e-7&&restoredMax-restoredMin<=full*100){self->_canvas.viewMin=restoredMin;self->_canvas.viewMax=restoredMax;}}self->_plotNote.stringValue=S(self->_canvas->plot.note);self->_plotNote.toolTip=S(self->_canvas->plot.note);[self layout];[self setBusy:NO message:S(data->notes)];[self rememberWorkspace];});
+            [self->_canvas resetZoom];if(restoreViewport&&restoredMax>restoredMin&&std::isfinite(restoredMin)&&std::isfinite(restoredMax)){double full=self->_canvas->plot.xMax-self->_canvas->plot.xMin;if(restoredMax-restoredMin>=full*1e-7&&restoredMax-restoredMin<=full*100){self->_canvas.viewMin=restoredMin;self->_canvas.viewMax=restoredMax;}}if(restoreViewport&&std::isfinite(restoredYMin)&&std::isfinite(restoredYMax)&&restoredYMax>restoredYMin){self->_canvas.viewYMin=restoredYMin;self->_canvas.viewYMax=restoredYMax;}self->_canvas.selectedSourceRow=self->_selectedRow+1;self->_plotNote.stringValue=S(self->_canvas->plot.note);self->_plotNote.toolTip=S(self->_canvas->plot.note);[self layout];[self setBusy:NO message:S(data->notes)];[self rememberWorkspace];});
     });
 }
 - (void)chooseOverlay:(id)sender {
@@ -760,13 +864,28 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     NSInteger index=_traceStage.selectedItem.tag;if(!_traceStage.numberOfItems||index<0||index>=(NSInteger)_trace.stages.size())return;auto stage=_trace.stages[index];if(stage.row<0||stage.path.empty())return;
     _pendingOpenPath=S(stage.path);_pendingOpenRow=stage.row;[self openPath:S(stage.path)];
 }
-- (void)loadPage:(long long)start {
+- (void)updatePageControls {
+    if(!_data)return;auto rows=_data->hdus[_hdu].rows;
+    _pageLabel.stringValue=[NSString stringWithFormat:@"%@–%@ of %@",countString(rows?_page.start+1:0),countString(_page.start+_page.rows.size()),countString(rows)];
+    _previous.enabled=_page.start>0;_next.enabled=_page.start+(long long)_page.rows.size()<rows;
+}
+- (void)selectPlotRow:(long long)sourceRow {
+    if(_busy||!_data||_canvas.contentMode!=0||!_canvas->plot.scatter||sourceRow<1||sourceRow>_data->hdus[_hdu].rows)return;
+    long long row=sourceRow-1;_inspectorHidden=NO;_inspectorMode.selectedSegment=1;[self inspectorChanged:nil];[self layout];
+    // Invalidate any older page request even when the newest point is on the current page.
+    ++_pageToken;
+    if(row>=_page.start&&row<_page.start+(long long)_page.rows.size()){
+        [self updatePageControls];NSInteger index=row-_page.start;BOOL alreadySelected=_eventTable.selectedRow==index;[_eventTable selectRowIndexes:[NSIndexSet indexSetWithIndex:index] byExtendingSelection:NO];[_eventTable scrollRowToVisible:index];
+        if(alreadySelected)[self tableViewSelectionDidChange:[NSNotification notificationWithName:NSTableViewSelectionDidChangeNotification object:_eventTable]];
+    }else [self loadPage:(row/250)*250 selectingRow:row];
+}
+- (void)loadPage:(long long)start {[self loadPage:start selectingRow:start];}
+- (void)loadPage:(long long)start selectingRow:(long long)selectedRow {
     if(!_data)return;auto data=_data;int hi=_hdu;NSUInteger token=++_pageToken;_pageLabel.stringValue=@"Loading table page…";
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{Page page;std::string err;try{page=readPage(*data,hi,start);}catch(const std::exception& e){err=e.what();}NSString* error=S(err);
-        dispatch_async(dispatch_get_main_queue(),^{if(token!=self->_pageToken)return;if(error.length){[self showError:error];return;}self->_page=std::move(page);[self->_eventTable deselectAll:nil];[self->_eventTable reloadData];
-            auto rows=data->hdus[hi].rows;self->_pageLabel.stringValue=[NSString stringWithFormat:@"%@–%@ of %@",countString(rows?self->_page.start+1:0),countString(self->_page.start+self->_page.rows.size()),countString(rows)];
-            self->_previous.enabled=self->_page.start>0;self->_next.enabled=self->_page.start+(long long)self->_page.rows.size()<rows;
-            if(!self->_page.rows.empty())[self->_eventTable selectRowIndexes:[NSIndexSet indexSetWithIndex:0] byExtendingSelection:NO];
+        dispatch_async(dispatch_get_main_queue(),^{if(token!=self->_pageToken||data!=self->_data||hi!=self->_hdu)return;if(error.length){[self showError:error];return;}self->_page=std::move(page);[self->_eventTable deselectAll:nil];[self->_eventTable reloadData];
+            [self updatePageControls];
+            if(!self->_page.rows.empty()){NSInteger index=selectedRow-self->_page.start;if(index<0||index>=(NSInteger)self->_page.rows.size())index=0;[self->_eventTable selectRowIndexes:[NSIndexSet indexSetWithIndex:index] byExtendingSelection:NO];[self->_eventTable scrollRowToVisible:index];}
         });
     });
 }
@@ -786,7 +905,7 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
 }
 - (void)tableViewSelectionDidChange:(NSNotification*)note {
     NSTableView* t=note.object;if(t==_fileTable){if(!_syncingCatalog)[self openSelectedFile:nil];return;}if(t!=_eventTable||!_data||t.selectedRow<0)return;
-    long long row=_page.start+t.selectedRow;_selectedRow=row;++_traceToken;auto data=_data;int hi=_hdu;_detailLabel.stringValue=[NSString stringWithFormat:@"ROW %lld · ALL FIELDS",row+1];
+    long long row=_page.start+t.selectedRow;_selectedRow=row;_canvas.selectedSourceRow=row+1;_canvas->_hoverLayer.needsDisplay=YES;++_traceToken;auto data=_data;int hi=_hdu;_detailLabel.stringValue=[NSString stringWithFormat:@"ROW %lld · ALL FIELDS",row+1];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{std::string details;Geometry g;try{details=rowDetail(*data,hi,row);g=readGeometry(*data,hi,row);}catch(const std::exception& e){details=e.what();}
         NSString* content=S(details);dispatch_async(dispatch_get_main_queue(),^{if(data!=self->_data||hi!=self->_hdu||row!=self->_selectedRow)return;self->_detail.string=content;self->_canvas->geometry=std::move(g);self->_canvas.needsDisplay=YES;});
     });
@@ -811,7 +930,7 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     if(!_hasAppliedPlot)return nil;
     if(o.x<0||o.x>=(int)h.columns.size()||o.y<0||o.y>=(int)h.columns.size())return nil;
     auto number=[](double n){return std::isfinite(n)?[NSString stringWithFormat:@"%.17g",n]:@"";};
-    return @{@"path":S(_data->path),@"hdu":@(_hdu),@"hduName":S(h.name),@"mode":@(int(o.mode)),@"x":S(h.columns[o.x].name),@"y":S(h.columns[o.y].name),@"reduction":@(int(o.reduction)),@"rowAxis":@(o.seriesByRow),@"bins":@(o.bins),@"eventClass":@(o.eventClass),@"clean":@(o.cleanOnly),@"valueMin":number(o.valueMin),@"valueMax":number(o.valueMax),@"timeMin":number(o.timeMin),@"timeMax":number(o.timeMax),@"logY":@(_canvas.logY),@"viewMin":@(_canvas.viewMin),@"viewMax":@(_canvas.viewMax)};
+    return @{@"path":S(_data->path),@"hdu":@(_hdu),@"hduName":S(h.name),@"mode":@(int(o.mode)),@"x":S(h.columns[o.x].name),@"y":S(h.columns[o.y].name),@"reduction":@(int(o.reduction)),@"rowAxis":@(o.seriesByRow),@"bins":@(o.bins),@"eventClass":@(o.eventClass),@"clean":@(o.cleanOnly),@"valueMin":number(o.valueMin),@"valueMax":number(o.valueMax),@"timeMin":number(o.timeMin),@"timeMax":number(o.timeMax),@"logY":@(_canvas.logY),@"viewMin":@(_canvas.viewMin),@"viewMax":@(_canvas.viewMax),@"viewYMin":@(_canvas.viewYMin),@"viewYMax":@(_canvas.viewYMax)};
 }
 - (void)rememberWorkspace {
     if(!_restoreEnabled)return;NSDictionary* state=[self workspaceSnapshot];if(state)[_preferences setObject:state forKey:@"WorkspaceV1"];[self saveWindowLayout];
@@ -830,7 +949,7 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     [_seriesAxis selectItemAtIndex:[state[@"rowAxis"]boolValue]||![_seriesAxis itemAtIndex:0].enabled?1:0];[_class selectItemAtIndex:_class.enabled?eventClass+1:0];_clean.state=_clean.enabled&&[state[@"clean"]boolValue]?NSControlStateValueOn:NSControlStateValueOff;
     _min.stringValue=state[@"valueMin"];_max.stringValue=state[@"valueMax"];_tmin.stringValue=state[@"timeMin"];_tmax.stringValue=state[@"timeMax"];
     _log.state=[state[@"logY"]boolValue]?NSControlStateValueOn:NSControlStateValueOff;_canvas.logY=_log.state==NSControlStateValueOn;
-    _restoredMin=[state[@"viewMin"]doubleValue];_restoredMax=[state[@"viewMax"]doubleValue];_restoreViewport=YES;
+    _restoredMin=[state[@"viewMin"]doubleValue];_restoredMax=[state[@"viewMax"]doubleValue];_restoredYMin=[state[@"viewYMin"]isKindOfClass:NSNumber.class]?[state[@"viewYMin"]doubleValue]:NaN;_restoredYMax=[state[@"viewYMax"]isKindOfClass:NSNumber.class]?[state[@"viewYMax"]doubleValue]:NaN;_restoreViewport=YES;
 }
 - (void)applicationWillTerminate:(NSNotification*)notification {[self rememberWorkspace];}
 - (void)chooseExport:(id)sender {
@@ -842,8 +961,8 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
 }
 - (PlotCanvas*)figureSnapshot {
     PlotCanvas* figure=[[PlotCanvas alloc]initWithFrame:NSMakeRect(0,0,1200,800)];figure.exporting=YES;figure->plot=_canvas->plot;figure->overlay=_canvas->overlay;
-    figure.hasOverlay=_canvas.hasOverlay;figure.logY=_canvas.logY;figure.viewMin=_canvas.viewMin;figure.viewMax=_canvas.viewMax;
-    NSString* caption=[NSString stringWithFormat:@"COSI Explorer · Source: %@\n%@\n%@\nVisible X: %.17g to %.17g · Y display: %@%@",_data?S(_data->path):@"",S(figure->plot.settings),S(figure->plot.note),figure.viewMin,figure.viewMax,figure.logY&&!figure->plot.scatter?@"log10(1+y)":@"linear",figure->plot.scatter&&figure->plot.x.size()>50000?@" · Display thinned to at most 50,000 visible points; CSV retains collected values.":@""];
+    figure.hasOverlay=_canvas.hasOverlay;figure.logY=_canvas.logY;figure.viewMin=_canvas.viewMin;figure.viewMax=_canvas.viewMax;figure.viewYMin=_canvas.viewYMin;figure.viewYMax=_canvas.viewYMax;
+    NSString* caption=[NSString stringWithFormat:@"COSI Explorer · Source: %@\n%@\n%@\nVisible X: %.17g to %.17g · Visible Y: %.17g to %.17g · Y display: %@%@",_data?S(_data->path):@"",S(figure->plot.settings),S(figure->plot.note),figure.viewMin,figure.viewMax,figure.viewYMin,figure.viewYMax,figure.logY&&!figure->plot.scatter?@"log10(1+y)":@"linear",figure->plot.scatter&&figure->plot.x.size()>50000?@" · Display thinned to at most 50,000 visible points; CSV retains collected values.":@""];
     if(_comparison)caption=[caption stringByAppendingFormat:@"\nOverlay A: %@\nOverlay B: %@ · %@",S(_comparison->pathA),S(_comparison->pathB),_comparison->normalized?@"unit-area normalization":@"raw counts"];
     figure.exportCaption=caption;NSMutableParagraphStyle* style=[NSMutableParagraphStyle new];style.lineBreakMode=NSLineBreakByWordWrapping;style.lineSpacing=3;
     figure.captionHeight=std::ceil([caption boundingRectWithSize:NSMakeSize(1156,10000) options:NSStringDrawingUsesLineFragmentOrigin attributes:@{NSFontAttributeName:[NSFont systemFontOfSize:11],NSParagraphStyleAttributeName:style}].size.height)+16;
@@ -948,8 +1067,55 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     }
     if(![pdf writeToFile:[_smokeDir stringByAppendingPathComponent:[name stringByAppendingString:@".pdf"]] atomically:YES]||![png writeToFile:[_smokeDir stringByAppendingPathComponent:[name stringByAppendingString:@".png"]] atomically:YES])throw std::runtime_error("Figure output failed");
 }
+// Native regression events target this application's own canvas, never the desktop.
+- (NSEvent*)testMouse:(NSEventType)type at:(NSPoint)point flags:(NSEventModifierFlags)flags {
+    return [NSEvent mouseEventWithType:type location:[_canvas convertPoint:point toView:nil] modifierFlags:flags timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:_window.windowNumber context:nil eventNumber:0 clickCount:1 pressure:0];
+}
+- (void)testClickPoint:(size_t)index {
+    [_canvas displayIfNeeded];auto it=std::find_if(_canvas->_targets.begin(),_canvas->_targets.end(),[&](const PlotTarget& t){return t.index==index;});
+    if(it==_canvas->_targets.end())throw std::runtime_error("Expected clickable source point missing");NSPoint p=it->point;
+    [_canvas mouseDown:[self testMouse:NSEventTypeLeftMouseDown at:p flags:0]];[_canvas mouseUp:[self testMouse:NSEventTypeLeftMouseUp at:p flags:0]];
+}
+- (void)testBoxFrom:(NSPoint)from to:(NSPoint)to flags:(NSEventModifierFlags)flags {
+    [_canvas mouseDown:[self testMouse:NSEventTypeLeftMouseDown at:from flags:flags]];
+    [_canvas mouseDragged:[self testMouse:NSEventTypeLeftMouseDragged at:to flags:flags]];
+    [_canvas mouseUp:[self testMouse:NSEventTypeLeftMouseUp at:to flags:flags]];
+}
+- (void)checkPlotNavigation {
+    auto check=[](bool ok,const char* message){if(!ok)throw std::runtime_error(message);};
+    auto equal=[](double a,double b){return std::abs(a-b)<1e-8*std::max(1.,std::abs(b));};
+    PlotViewport full=[_canvas viewport];NSRect r=[_canvas chartRect];
+    auto point=[&](double x,double y){return NSMakePoint(r.origin.x+x*r.size.width,r.origin.y+y*r.size.height);};
+    _plotInteraction.selectedSegment=2;[NSApp sendAction:_plotInteraction.action to:_plotInteraction.target from:_plotInteraction];
+    [self testBoxFrom:point(.2,.2) to:point(.8,.8) flags:0];auto zoom=[_canvas viewport];
+    check(equal(zoom.xMin,full.xMin+.2*(full.xMax-full.xMin))&&equal(zoom.xMax,full.xMin+.8*(full.xMax-full.xMin))&&equal(zoom.yMin,full.yMin+.2*(full.yMax-full.yMin))&&equal(zoom.yMax,full.yMin+.8*(full.yMax-full.yMin)),"Box zoom must change both axes");
+    check(_zoomBack.enabled&&_zoomReset.enabled,"Visible navigation buttons must reflect zoom history");
+    [NSApp sendAction:_zoomReset.action to:_zoomReset.target from:_zoomReset];check(![_canvas canResetViewport]&&_zoomBack.enabled,"Reset must fit data and remain undoable");
+    [NSApp sendAction:_zoomBack.action to:_zoomBack.target from:_zoomBack];check(equal(_canvas.viewYMin,zoom.yMin),"Back must undo Reset");
+    [_canvas goBack];check(![_canvas canResetViewport]&&_canvas->_history.empty(),"Back must restore both original axes");
+    [self testBoxFrom:point(.8,.8) to:point(.2,.2) flags:0];check(equal(_canvas.viewYMax,zoom.yMax),"Reverse rectangle zoom");[_canvas goBack];
+    [self testBoxFrom:point(.4,.4) to:NSMakePoint(point(.4,.4).x+2,point(.4,.4).y+20) flags:0];check(_canvas->_history.empty(),"Tiny rectangle must not create a zoom");
+    [_canvas mouseDown:[self testMouse:NSEventTypeLeftMouseDown at:point(.3,.3) flags:0]];[_canvas mouseDragged:[self testMouse:NSEventTypeLeftMouseDragged at:point(.6,.7) flags:0]];
+    [self savePreview:@"04-box-zoom-selection.png"];[_canvas cancelInteraction];[_canvas mouseUp:[self testMouse:NSEventTypeLeftMouseUp at:point(.6,.7) flags:0]];check(_canvas->_history.empty()&&![_canvas canResetViewport],"Escape/cancel must discard rectangle");
+    _plotInteraction.selectedSegment=0;[self plotInteractionChanged:nil];[self testBoxFrom:point(.2,.2) to:point(.8,.8) flags:NSEventModifierFlagShift];check(equal(_canvas.viewYMin,zoom.yMin),"Shift-drag box zoom shortcut");
+    [_canvas goBack];_plotInteraction.selectedSegment=1;[self plotInteractionChanged:nil];long long selected=_selectedRow;[self testClickPoint:300];check(_selectedRow==selected,"Pan tool must not select points");
+    [self testBoxFrom:point(.4,.4) to:point(.5,.6) flags:0];check(!equal(_canvas.viewMin,full.xMin)&&_canvas.viewYMin==full.yMin,"Pan must preserve Y");[_canvas goBack];
+    [_canvas mouseDown:[self testMouse:NSEventTypeLeftMouseDown at:point(.4,.4) flags:0]];[_canvas mouseDragged:[self testMouse:NSEventTypeLeftMouseDragged at:point(.5,.5) flags:0]];[_canvas cancelInteraction];check(![_canvas canResetViewport]&&_canvas->_history.empty(),"Cancel must undo an unfinished pan");
+    _plotInteraction.selectedSegment=2;[self plotInteractionChanged:nil];[self testBoxFrom:point(.2,.2) to:point(1.5,1.5) flags:0];check(equal(_canvas.viewMax,full.xMax)&&equal(_canvas.viewYMin,full.yMin),"Rectangle must clamp to chart");
+    [_canvas resetZoom];check(_canvas->_history.empty()&&!_zoomBack.enabled,"New plots must clear history");
+    double anchor=full.xMin+.3*(full.xMax-full.xMin);[_canvas zoomXAtPoint:point(.3,.4) delta:-10];[_canvas zoomXAtPoint:point(.3,.4) delta:-10];
+    check(equal(_canvas.viewMin+.3*(_canvas.viewMax-_canvas.viewMin),anchor)&&_canvas->_history.size()==1&&_canvas.viewYMin==full.yMin,"Wheel zoom must preserve its anchor/Y and group rapid steps");
+    [_canvas goBack];[_canvas zoomXAtPoint:NSMakePoint(-1,-1) delta:-10];check(![_canvas canResetViewport]&&_canvas->_history.empty(),"Wheel outside chart must not change viewport");
+    _plotInteraction.selectedSegment=0;[self plotInteractionChanged:nil];
+    selected=_selectedRow;[_canvas mouseDown:[self testMouse:NSEventTypeLeftMouseDown at:NSMakePoint(-1,-1) flags:0]];[_canvas mouseUp:[self testMouse:NSEventTypeLeftMouseUp at:NSMakePoint(-1,-1) flags:0]];
+    [self setBusy:YES message:@"Testing busy guard"];[self testClickPoint:300];[self setBusy:NO message:S(_data->notes)];check(_selectedRow==selected,"Outside/busy clicks must not select a row");
+    NSRect original=_window.frame;NSRect compact=original;compact.size=_window.minSize;[_window setFrame:compact display:NO];[self layout];
+    check(NSMaxY(_eventScroll.frame)<=NSMinY(_previous.frame)&&NSMaxX(_zoomReset.frame)<=NSMaxX(_canvas.frame),"Compact layout must keep plot controls and table paging separate");
+    [self savePreview:@"05-compact-navigation.png"];[_window setFrame:original display:NO];[self layout];
+}
 - (void)checkRestoredToolsState {
     const auto& o=_lastOptions;if(o.mode!=Mode::Series||!o.seriesByRow||o.reduction!=Reduction::Sum||o.eventClass!=0||o.valueMin!=500||o.timeMin!=100||o.timeMax!=450||!_sidebarHidden||_inspectorHidden)throw std::runtime_error("Workspace controls or layout were not restored");
+    double yspan=_canvas->plot.yMax-_canvas->plot.yMin;if(std::abs(_canvas.viewYMin-(_canvas->plot.yMin+.1*yspan))>1e-8||std::abs(_canvas.viewYMax-(_canvas->plot.yMin+.8*yspan))>1e-8)throw std::runtime_error("Workspace Y viewport was not restored");
     double span=_canvas->plot.xMax-_canvas->plot.xMin;if(std::abs(_canvas.viewMin-(_canvas->plot.xMin+.2*span))>1e-8||std::abs(_canvas.viewMax-(_canvas->plot.xMin+.7*span))>1e-8)throw std::runtime_error("Workspace viewport was not restored");
     NSRect expected=NSRectFromString([_preferences stringForKey:@"TestExpectedFrame"]);if(_window.screen)expected=[_window constrainFrameRect:expected toScreen:_window.screen];if(std::abs(_window.frame.size.width-expected.size.width)>1||std::abs(_window.frame.size.height-expected.size.height)>1)throw std::runtime_error("Window size was not restored");
     if(_canvas->plot.sourceRows.empty()||_canvas->plot.x.front()!=_canvas->plot.sourceRows.front())throw std::runtime_error("Restored original row provenance");
@@ -968,12 +1134,26 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
         NSString* info=[_canvas hoverDetailsAtPoint:_canvas.hover];if(![info containsString:@"Original row: 301"]||![info containsString:@"TIME [s]: 150"]||![info containsString:@"ENERGY [keV]"])throw std::runtime_error("Hover must show the actual source point");
         if([_canvas hoverDetailsAtPoint:NSMakePoint(-1,-1)])throw std::runtime_error("Hover outside plot must clear");
         [self savePreview:@"01-time-hover.png"];[self saveTestFigure:@"time-series"];
+        [self checkPlotNavigation];[self testClickPoint:300];_smokeStep=10;
+    }else if(_smokeStep==10){
+        if(_selectedRow!=300)return;
+        if(_page.start!=250||_eventTable.selectedRow!=50||_canvas.selectedSourceRow!=301||_inspectorMode.selectedSegment!=1||_inspectorHidden)throw std::runtime_error("Click must reveal and select the original row on another table page");
+        [self savePreview:@"06-clicked-source-row.png"];
+        // The second click is on the existing page and must invalidate the first pending page request.
+        [self testClickPoint:1000];[self testClickPoint:301];_smokeStep=11;
+    }else if(_smokeStep==11){
+        if(_selectedRow!=301)return;
+        if(_page.start!=250||_eventTable.selectedRow!=51||_canvas.selectedSourceRow!=302||[_pageLabel.stringValue containsString:@"Loading"])throw std::runtime_error("Rapid clicks must preserve the newest original row");
         [_seriesAxis selectItemAtIndex:1];[_reduce selectItemAtIndex:2];[_class selectItemAtIndex:1];_min.stringValue=@"500";_tmin.stringValue=@"100";_tmax.stringValue=@"450";
         [NSApp sendAction:_seriesAxis.action to:_seriesAxis.target from:_seriesAxis];_smokeStep=1;
     }else if(_smokeStep==1){
         if(_canvas->plot.sourceRows.empty()||_canvas->plot.sourceRows.size()>=900)throw std::runtime_error("Expected filtered row plot");
         for(size_t i=0;i<_canvas->plot.x.size();++i)if(_canvas->plot.x[i]!=_canvas->plot.sourceRows[i]||_canvas->plot.sourceTimes[i]<100||_canvas->plot.y[i]<500)throw std::runtime_error("Filtered hover provenance");
-        [_window setContentSize:NSMakeSize(1320,860)];_sidebarHidden=YES;_inspectorHidden=NO;[self layout];double span=_canvas->plot.xMax-_canvas->plot.xMin;_canvas.viewMin=_canvas->plot.xMin+.2*span;_canvas.viewMax=_canvas->plot.xMin+.7*span;_canvas.needsDisplay=YES;[_canvas displayIfNeeded];
+        [self testClickPoint:_canvas->plot.x.size()/2];_smokeStep=12;
+    }else if(_smokeStep==12){
+        long long expected=_canvas->plot.sourceRows[_canvas->plot.x.size()/2]-1;if(_selectedRow!=expected)return;
+        if(_page.start+_eventTable.selectedRow!=expected||_canvas.selectedSourceRow!=expected+1)throw std::runtime_error("Filtered point click must use its original source row");
+        [_window setContentSize:NSMakeSize(1320,860)];_sidebarHidden=YES;_inspectorHidden=NO;[self layout];double span=_canvas->plot.xMax-_canvas->plot.xMin;_canvas.viewMin=_canvas->plot.xMin+.2*span;_canvas.viewMax=_canvas->plot.xMin+.7*span;double yspan=_canvas->plot.yMax-_canvas->plot.yMin;_canvas.viewYMin=_canvas->plot.yMin+.1*yspan;_canvas.viewYMax=_canvas->plot.yMin+.8*yspan;_canvas.needsDisplay=YES;[_canvas displayIfNeeded];
         [_preferences setObject:NSStringFromRect(_window.frame) forKey:@"TestExpectedFrame"];_toolsWorkspace=[self workspaceSnapshot];if(!_toolsWorkspace)throw std::runtime_error("Workspace snapshot missing");
         auto point=_canvas->_targets.at(_canvas->_targets.size()/2).point;_canvas.hover=point;_canvas.needsDisplay=YES;[self savePreview:@"02-filtered-row-hover.png"];[self saveTestFigure:@"filtered-rows"];
         _tmin.stringValue=@"";_tmax.stringValue=@"";[_mode selectItemAtIndex:0];[NSApp sendAction:_mode.action to:_mode.target from:_mode];_smokeStep=2;
@@ -983,13 +1163,19 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
         if(!_comparison)return;[_canvas displayIfNeeded];NSRect r=[_canvas chartRect];_canvas.hover=NSMakePoint(NSMidX(r),NSMidY(r));NSString* info=[_canvas hoverDetailsAtPoint:_canvas.hover];
         if(![info containsString:@"Bin: ["]||![info containsString:@"B "]||[info containsString:@"Original row"])throw std::runtime_error("Histogram hover must describe bins, not source rows");
         [self savePreview:@"03-overlay-bin-hover.png"];[self saveTestFigure:@"log-overlay"];
+        long long selected=_selectedRow;[_canvas mouseDown:[self testMouse:NSEventTypeLeftMouseDown at:_canvas.hover flags:0]];[_canvas mouseUp:[self testMouse:NSEventTypeLeftMouseUp at:_canvas.hover flags:0]];
+        if(_selectedRow!=selected)throw std::runtime_error("Aggregate bins must not select an invented row");
+        _plotInteraction.selectedSegment=2;[self plotInteractionChanged:nil];double maxLog=std::log10(1+_canvas->plot.yMax);
+        [self testBoxFrom:NSMakePoint(r.origin.x+.2*r.size.width,r.origin.y+.2*r.size.height) to:NSMakePoint(r.origin.x+.8*r.size.width,r.origin.y+.8*r.size.height) flags:0];
+        if(std::abs(_canvas.viewYMin-(std::pow(10,maxLog*.2)-1))>1e-8||std::abs(_canvas.viewYMax-(std::pow(10,maxLog*.8)-1))>1e-8)throw std::runtime_error("Log box zoom must invert the displayed Y transform");
+        [_canvas goBack];_plotInteraction.selectedSegment=0;[self plotInteractionChanged:nil];
         _normalize.state=NSControlStateValueOn;[self overlayNormalizationChanged:nil];_smokeStep=4;
     }else if(_smokeStep==4){
         if(!_comparison||!_comparison->normalized)return;[self saveTestFigure:@"normalized-overlay"];
         _overlayData.reset();_comparison.reset();_canvas.hasOverlay=NO;[self restoreWorkspaceControls:_toolsWorkspace];[self updatePlot:nil];_smokeStep=5;
     }else{
         [self rememberWorkspace];[_preferences synchronize];[self checkRestoredToolsState];
-        [@"PASS: native hover target/action shows full-precision plotted values and original row/time provenance; filtered row provenance; bin hover with overlays; PNG/PDF snapshots of time/row/log-overlay/normalized-overlay plots; viewer note separation; saved applied workspace and viewport.\n" writeToFile:[_smokeDir stringByAppendingPathComponent:@"ui-result.txt"] atomically:YES encoding:NSUTF8StringEncoding error:nil];[NSApp terminate:nil];return;
+        [@"PASS: native click selects original rows across table pages and rapid requests; rectangle zoom on both axes, reverse/Shift/clamped/tiny/cancel gestures, Pan, Back/Reset, log zoom, compact controls; native hover target/action shows full-precision plotted values and original row/time provenance; filtered row provenance; bin hover with overlays; PNG/PDF snapshots of time/row/log-overlay/normalized-overlay plots; viewer note separation; saved applied workspace and X/Y viewport.\n" writeToFile:[_smokeDir stringByAppendingPathComponent:@"ui-result.txt"] atomically:YES encoding:NSUTF8StringEncoding error:nil];[NSApp terminate:nil];return;
     }
 }
 - (void)smokeTick {

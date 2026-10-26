@@ -2,6 +2,10 @@
 
 ## 0.1.1 — in development
 
+- Click plotted points to select their original table rows across pages and reveal all fields.
+- Inspect/Pan/Box zoom controls, rectangle zoom on both axes, and undoable Back/Reset navigation.
+- X/Y viewport restoration and figure provenance; selected-row highlighting in point plots.
+
 - Point hover readouts with full-precision plotted values, original rows, and stored time; histogram bin/overlay readouts.
 - PNG and searchable vector PDF figure export with applied filters, units, sources, display range, and normalization.
 - Last file/HDU, plot settings, viewport, and window/panel layout restored on reopening.
