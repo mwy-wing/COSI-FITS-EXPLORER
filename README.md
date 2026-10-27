@@ -7,7 +7,7 @@
 [![v0.1.1](https://img.shields.io/badge/version-0.1.1-4f64e8)](https://github.com/mwy-wing/COSI-FITS-EXPLORER/releases/tag/v0.1.1)
 [![MIT License](https://img.shields.io/badge/license-MIT-10b981)](LICENSE)
 
-**[Download for Mac ↓](https://github.com/mwy-wing/COSI-FITS-EXPLORER/releases/download/v0.1.1/COSI-Explorer-v0.1.1-macos-arm64.dmg)** · [Try demo data](https://github.com/mwy-wing/COSI-FITS-EXPLORER/releases/download/v0.1.1/synthetic-events.fits) · [User guide](docs/USER_GUIDE.md) · [Contribute](CONTRIBUTING.md)
+**[Download for Mac ↓](https://github.com/mwy-wing/COSI-FITS-EXPLORER/releases/download/v0.1.1/COSI-Explorer-v0.1.1-macos-arm64.dmg)** · [Try demo data](https://github.com/mwy-wing/COSI-FITS-EXPLORER/releases/download/v0.1.1/synthetic-events.fits) · [User guide](docs/USER_GUIDE.md) · [Report a bug](https://github.com/mwy-wing/COSI-FITS-EXPLORER/issues)
 
 </div>
 
@@ -54,4 +54,4 @@ open "dist/COSI Explorer.app"
 
 ---
 
-[User guide](docs/USER_GUIDE.md) · [Release guide](docs/RELEASING.md) · [Contributors](AUTHORS.md) · [MIT license](LICENSE)
+[User guide](docs/USER_GUIDE.md) · [Releases](https://github.com/mwy-wing/COSI-FITS-EXPLORER/releases) · [Contributors](AUTHORS.md) · [MIT license](LICENSE)

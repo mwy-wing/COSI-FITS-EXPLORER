@@ -2,143 +2,80 @@
 
 [← COSI Explorer](../README.md)
 
-## The workspace
+## Open and inspect
 
-The toolbar provides Open, Compare spectra, Export plot (PNG/PDF/CSV), and library/inspector toggles. The file header summarizes the selected product, row/event/packet count, field count, and file size.
+Open a FITS or supported COSI packet file, drop one onto the window, or choose a data folder for the library. Search filters the catalog by filename/path; FITS / L0 / All narrows the file types. Use the HDU menu to choose a table or image extension.
 
-In **Explore**, the right inspector has three tabs: **Plot** contains plot controls, filters, and comparison-file controls (scroll for additional settings); **Selection** contains the selected event's full fields or the comparison report; **Summary** describes the applied column values. **Apply to plot** is fixed at the bottom of the settings inspector. Column, chart-type, array-reduction, event-class, and quality selections update the plot automatically. Use Apply to plot or Command-Return after editing bins or numeric ranges; Command-0 resets plot zoom. The View menu can hide the library or inspector to give plots and tables more room.
+- **Explore:** plot data and browse the paged table. **All rows** shows the source table; **Plotted rows** shows unique rows contributing to the applied plot. Row numbers stay original and 1-based. **Row # / Go** jumps to an original source row; in Plotted rows it must belong to the applied plot.
+- **Header:** original FITS cards plus separately labeled viewer notes; packet files show framing/decoder information.
+- **Hit geometry:** selected-event X/Y, X/Z, Y/Z projections. Connections require a valid `SEQHIT` permutation. Raw electronics IDs are not detector positions.
+- **Trace event:** inspect related processing-stage records and their match/candidate status.
 
-In **Trace event**, click a processing-stage card to inspect that stage's record and match context, then use **Open stage row** to navigate. The cards retain distinct matched, candidate, missing-event, and selected-source states. Full field values remain selectable text below the cards.
+The inspector has **Plot**, **Selection**, and **Summary** tabs. The toolbar opens files, compares spectra, exports plots, and toggles the library/inspector. Choose a table row to inspect all fields, including complete hit arrays.
 
-## Explore your data
+## Plot and filter
 
-- The catalog searches relative paths as well as filenames. Its FITS / L0 / All buttons narrow the list. Select a file to open it. Use Choose folder again to refresh an updated directory.
-- Select an HDU from the popup to inspect event tables, telemetry tables, spacecraft attitude/orbit tables, or an image plane.
-- **Explore** combines a plot with a paged, horizontally scrollable table. Choose **All rows** for the full source table or **Plotted rows** for unique rows contributing to the applied plot. Arrow buttons change pages; **Row # / Go** jumps to an original 1-based source row. Select a row for all column values in the inspector.
-- **Header** shows the selected HDU's FITS cards, including units and time-reference metadata. For L0 it shows framing, APID counts, sequence jumps, and decoder notes.
-- **Hit geometry** shows X/Y, X/Z, Y/Z projections for the selected calibrated event. Choose the event in Explore first. Connections appear only when `SEQHIT` is a valid 1…NUMHIT permutation. Raw readout IDs are not interpreted as positions.
+Column, chart type, reduction, class, and quality selections update automatically. After editing numeric ranges or bin counts, click **Apply to plot** or press ⌘Return. Blank limits are unbounded; value/time bounds are inclusive and use stored units. Class/quality controls are enabled only when supported columns exist.
 
-### Plots
+| Chart type | What it shows |
+| --- | --- |
+| Column values | Selected Y values against stored time or original row number. Row number is used when no supported time column exists. |
+| Histogram | Selected values per bin. ENERGY with All elements shows active interaction energies; Sum row / hits shows total deposited energy per event. |
+| Event counts vs time | One count per row when at least one reduced gate value passes the cuts. Choose a scalar gate such as TIME or EVENTID to include rows irrespective of hit multiplicity. Counts have no exposure correction. |
+| Column comparison | Selected reduction on X and the first stored element on Y. This is not paired per-hit correlation. |
 
-Choose a numeric column and array reduction; these selections update automatically. Edit optional numeric ranges or histogram bins, then click **Apply to plot**. Blank limits are unbounded. Value and time limits are inclusive and use the stored column units. The EVENTCLASS and Clean only controls activate only when their corresponding columns exist.
+**All elements**, **First element**, and **Sum row / hits** control array reduction. Recognized hit fields honor NUMHIT/NUMSTRIPHIT, excluding padded slots. Empty active arrays or non-finite active inputs contribute no sum. PHA/TAC remain uncalibrated channels. Value filters act on the selected column after reduction; in Column values this is Y.
 
-- **Column values (default):** choose **X axis → Time** or **Row number (1, 2, 3…)**, then choose a **Y column**. Each point uses a source value, without histogram binning. Time retains its stored units and reference; no epoch or clock correction is applied. Row numbers are the original 1-based table positions, retained after filters. When there is no supported time column, Row number is selected automatically and Time is unavailable. **All elements** plots each active array value at its source row/time; **First element** or **Sum row / hits** gives one reduced Y value per valid row. Value filters act on Y.
-- **Histogram / All elements:** one entry per finite array element. Recognized hit fields honor NUMHIT/NUMSTRIPHIT so padded storage slots do not contribute. Select ENERGY to inspect individual interaction energies; PHA/TAC remain uncalibrated channels.
-- **Histogram / Sum row / hits:** sum each row's active values. For ENERGY this gives total deposited event energy. A row with zero active hits or nonfinite active values contributes no sum.
-- **Event counts vs time:** use TIME (or TimeTags / GeD GPS_SECONDS) as the horizontal axis. The selected X column acts as a value gate. A row contributes **one** count if at least one reduced value passes the gate. To count all rows irrespective of hit multiplicity, select a scalar column such as TIME or EVENTID as the gate. Counts are per time bin, without live-time/exposure correction.
-- **Column comparison:** selected reduction on X, first stored element on Y. This is an explicitly labeled column comparison, not paired per-hit correlation. Select X/Y/Z columns with First element for first-hit coordinate comparisons.
+- **Inspect:** hover near a displayed point for its values/source row, or click to reveal that row and all fields. Aggregate-bin hover shows the bin interval/counts, without assigning an individual event.
+- **Pan:** drag the X range without selecting a row. Inspect also supports dragging to pan.
+- **Box zoom:** drag a rectangle to zoom both axes; Shift-drag is the shortcut. Scroll zooms X around the pointer.
+- **Back** (⌘[) returns to a previous view. **Reset** (⌘0 or double-click) fits the full plot. Escape cancels a drag. New plot data/settings clear zoom history.
 
-Scroll over the plot to zoom X, drag to pan, and double-click to reset. **Log Y** changes the histogram display to log10(1+count). Export plot CSV writes linear plotted values, bin centers for histograms, source path, HDU, filters, reduction, and scan counts. It does not export the raw table.
+Log Y displays histogram values as log10(1+y). Zooming and display thinning do not change Plotted rows or statistics. Amber rings mark visible points belonging to the selected row.
 
-### Trace an event through the pipeline
+## Summary and export
 
-1. Open an L1a, L1b, or L2 FITS product, select a row in Explore, and choose **Trace event**.
-2. Read the pipeline summary: related L1a/L1b/L2 files show their matching row, multiplicity, event class, total active energy where available, and quality flags. Missing events and ambiguous IDs are explicit.
-3. Select a stage in the popup and click **Open stage row** to navigate to that product and event. This works for L0 candidates too, with the candidate status retained in the trace report.
-4. Use **Choose L0…** to inspect an explicitly selected raw stream when it is not available as a sibling product.
+**Summary** shows minimum, maximum, median, mean, collected values, and contributing rows for the applied column, before binning/thinning. Column comparison summarizes X from accepted pairs. Event-count plots summarize the first accepted gate value per counted event. Overlays summarize source A's original values, independently of count normalization or logarithmic display.
 
-Automatic discovery is intentionally local: it searches immediate L1a/L1b/L2/L0 sibling folders under the selected run, and requires the same filename stem after removing the processing-level suffix. It does not silently borrow a product from a different run. Several compatible filename variants are listed separately. Custom layouts without these sibling folders can still inspect the selected source, but need a future explicit product-bundle selector for additional FITS links.
+Non-finite items and empty rows are counted after class/quality/time cuts and before value gating. A sum containing a non-finite active input counts as one invalid reduced value; no active values counts as an empty row. Invalid hit-count rows are separate. No accepted values produces unavailable statistics, rather than zero. **Copy summary** includes full plotted precision, units, source, settings, and limits. Calculations use double precision; the table/Selection inspector preserve exact integer identifiers.
 
-Cross-file FITS links require a unique exact integer/string EVENTID, matching OBS_ID, TELESCOP, INSTRUME, declared time system/unit/reference, and matching stored TIME within one microsecond. The TIME column must use seconds. Missing metadata, repeated IDs, and inconsistent times produce candidates or withheld links rather than assumed matches. The selected source row is identified separately. File dates do not establish observation dates.
+Use **Export plot** for PNG, PDF, or CSV. Figures include axes/units, sources, applied filters, visible X/Y ranges, scan limits, and overlay normalization. PNG is 2× resolution; PDF retains searchable text/vector drawing. Hover cards, selection rings, zoom rectangles, and UI controls are excluded. The figure is captured before the Save panel opens. CSV retains collected plot values, not a raw-table export; histograms export bin centers/counts.
 
-L0 packets have no EVENTID. If there is exactly one matched L1a product and the L0 packet count equals the L1a row count, the viewer can show the packet at the L1a row position. It requires standalone GeD packets and compares nonempty PHA/TAC arrays. **This remains a row-order candidate even when the arrays agree**: it does not establish source provenance, apply an epoch conversion, or map electronics IDs to strip positions. Start a trace from a FITS event table.
+## Compare spectra
 
-For a concrete example, open `26/10/06/v1/L1b/cs20260630ged_00_l1b.fits`, select row 1, and choose Trace event. EVENTID 1 has L1a strip data, an L1b strip-pairing quality flag, and no corresponding L2 row. The report displays that evidence without claiming that absence alone proves a particular screening decision. The canonical L0 example can be chosen from `26/06/10/v1/L0/STTC_HP52542_Cs137_100k_l0.bin`.
+Open source A, choose Histogram and its column/reduction, then **Overlay file…** for B. Select B's HDU when necessary. Both spectra use shared bin edges and matching declared column units; mismatches are rejected rather than converted. Time-gated comparisons also require compatible declared time references. **Unit area** normalizes counts for shape comparison; it does not correct exposure. A is blue and B is orange. Clear removes the overlay.
 
-### Compare two spectra
+## Trace an event
 
-1. Open reference file **A**, select Histogram, the numeric column, and reduction. For total deposited event energies choose ENERGY and **Sum row / hits**.
-2. Click **Overlay file…** and choose comparison file **B**. The matching HDU name is selected when available; otherwise select the comparison HDU explicitly if several exist.
-3. Both histograms use identical bin edges, the same reduction/cuts, and the same declared column units. A is teal; B is orange. Mismatched units are rejected rather than converted implicitly. Changing columns, reduction, or event selections recomputes both spectra automatically. Use Apply to plot after editing bins or numeric ranges.
-4. Toggle **Unit area** for a shape comparison: each spectrum's bin values sum to one. Leave it off to compare raw counts. Neither mode applies exposure or background correction.
-5. The right inspector shows source paths, HDUs, counts, means, mean difference, and effective settings. Selecting a table row replaces that inspector with the row's fields; Apply to plot restores the comparison summary.
-6. **Export plot CSV…** saves the common bin centers, A, B, and B−A, along with both paths, HDUs, effective settings, and normalization. **Clear** returns to the single-file plot. Changing the reference file/HDU clears the previous overlay.
+Select a FITS event row, open **Trace event**, and click a stage card for its record and match context. **Open stage row** navigates to that record. **Choose L0…** supplies a raw stream explicitly.
 
-Time-gated overlays and TIME/TimeTags column overlays require comparable FITS event time-reference metadata. The viewer does not assume that matching energy units imply matching exposure, input event sets, or calibration. Table browsing continues to show raw rows from reference A only.
+Discovery searches immediate L1a/L1b/L2/L0 sibling folders within the selected run and matching filename stems. It does not infer observation identity from file dates. Custom directory layouts may need manual file selection.
 
-### Supported formats and scientific boundaries
+Confirmed FITS links require a unique exact EVENTID, matching OBS_ID/TELESCOP/INSTRUME and declared time system/unit/reference, plus stored TIME matching within one microsecond in seconds. Missing metadata, repeated IDs, or inconsistent times produce candidates or withheld links.
 
-- FITS binary/ASCII tables, scalar and vector numeric columns, strings, logical values, and fixed/variable bit arrays (including PX). Null/nonfinite values are identified. Full 64-bit integer identifiers remain exact in table text; plot coordinates use double precision.
-- FITS images: a linear-color preview of the **first plane**, up to 16 million pixels. No WCS sky projection or image cube slicing.
-- Bare CCSDS SPP streams and COSI 20-byte L0 file containers, with optional file CRC-16 trailer verification. Framing and declared packet counts are checked; malformed/truncated streams report an error. A CRC mismatch is labeled in the status.
-- GeD APIDs 0x0DD, 0x0E2, 0x0E3: local Nuclearizer secondary/event headers and normal, neighbor, guard-ring, and type-3 bit-packed hits. PHA/TAC and electronics READOUT_ID are preserved. Other APID payloads are available as hex; no unverified timestamp/payload schema is assigned.
-- Text `.dat` models, `.tra`, `.sim`, `.roa`, HDF5, and sync/CRC transport frames are outside this first version. A filename extension alone is not treated as proof of packet format.
+L0 has no EVENTID. A row-order candidate requires one matched L1a product, equal row/packet counts, standalone GeD packets, and comparison of nonempty PHA/TAC arrays. Agreement remains a candidate; it does not prove event identity, convert epochs, or map electronics IDs to strips.
 
-The viewer does not apply calibration, strip maps, clock corrections, spacecraft attitude, event reconstruction, or sky localization. It preserves source timestamps and metadata. In particular, the October 6 run's documented TT-offset correction and the September test attitude's documented unit issue are **not silently repaired**. Test files retain their TEST filenames.
+## Data scope and reopening
 
-Table pages contain 250 rows. Plots scan at most two million source rows / five million plotted values; partial scans are explicitly marked. Point plots show at most 50,000 evenly selected points in the visible X range, while CSV export retains the collected points. Packet indexing stops with an explicit error above five million packets. There is no implicit random sampling.
+Files are opened read-only. Values preserve declared units and time reference; the app applies no calibration, reconstruction, clock/attitude correction, exposure correction, or sky localization. This independent viewer is not endorsed by NASA or the COSI mission.
 
-## Build and verify
+Plots scan at most two million source rows and collect at most five million values; partial results are labeled. Dense point displays retain at most 50,000 points in the visible region, while CSV retains collected values. Hover identifies displayed points within 12 screen points. Packet indexing rejects streams above five million packets. FITS images show the first plane, limited to 16 million pixels.
 
-Requires CMake, pkg-config, CFITSIO development files, and Xcode Command Line Tools for the macOS interface. The automated C++ suites generate synthetic fixtures and need no mission dataset.
+Reopening restores the last file/HDU, applied settings, X/Y view, table choice, window layout, and panel visibility. Missing/incompatible files/settings fall back to defaults. Comparisons must be reopened separately. Preferences stay local; `--no-restore` skips restoring/saving the workspace for that session.
 
-```sh
-bash build.sh
-```
+## Build, tests, and releases
 
-The script builds, runs the core tests, and packages the app in `dist/` with CFITSIO included and an ad-hoc local signature. It does not install anything or modify your source data. The included CFITSIO has only macOS system-library dependencies; recheck this if rebuilding against a different installation.
-
-The portable C++ reader and CLI can also be built separately:
+See the [README](../README.md) for dependencies and `bash build.sh`. The portable C++ reader/CLI also builds on Linux. The desktop GUI requires macOS. The binary download requires Apple Silicon and macOS 15+; it is ad-hoc signed and not Apple-notarized. No Homebrew tap or in-app updater is published.
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j 4
+cmake --build build -j4
 ctest --test-dir build --output-on-failure
-./build/cosi-inspect /absolute/path/example.fits --plot ENERGY
+bash tests/check-plot-tools.sh "dist/COSI Explorer.app"
 ```
 
-`src/Data.cpp` contains the reader and plotting logic. `src/App.mm` contains the macOS interface. `tests/core_tests.cpp` builds independent byte/FITS fixtures for meaningful decoding and scientific-count checks. See [VALIDATION.md](../VALIDATION.md) for reproducible checks and validation scope.
+The three CTest suites and native GUI regression use synthetic fixtures. The GUI check requires a logged-in macOS session. Reader/plot changes should preserve units, exact table IDs, scan limits, and conservative provenance checks. Report bugs through [GitHub Issues](https://github.com/mwy-wing/COSI-FITS-EXPLORER/issues), with version/platform, expected behavior, and a shareable reproduction.
 
-`src/Workflow.cpp` implements trace discovery, identity checks, shared-bin overlays, and comparison CSV output. `tests/workflow_tests.cpp` covers these workflows, including cases where an automatic match must be withheld. The CLI also supports:
+For a release, update CMakeLists.txt/Info.plist and the changelog, increase the bundle build number, and run `bash release.sh`. Verify checksums and the packaged app, then attach the DMG, app/source ZIPs, demo, and SHA256SUMS.txt to a GitHub Release at the matching tested tag. Preserve existing release tags/assets. Signing can use `COSI_SIGN_IDENTITY`; Developer ID signing and [Apple notarization](https://developer.apple.com/developer-id/) are separate steps from creating a DMG.
 
-```sh
-./build/cosi-inspect /absolute/path/product.fits --trace 1
-./build/cosi-inspect /absolute/path/reference.fits --compare /absolute/path/comparison.fits --normalize
-```
-
-The CLI comparison chooses the first table in each file and uses summed ENERGY when present, otherwise per-hit PHA. The desktop interface provides explicit HDU/column selection.
-
-A native GUI regression drives the actual popup target/action events and checks rendered plot data against source values, including rapid changes and scatter Y selections:
-
-```sh
-bash tests/check-column-updates.sh "dist/COSI Explorer.app" /path/to/COSI-SDC/Data
-```
-
-Run it from this source folder in a macOS GUI session. It writes a pass/fail report and application-rendered preview to a temporary directory, or the optional third argument.
-
-In Column values mode, CSV exports the actual time/row and Y-value pairs. The plot shows points in source order and may thin its display to 50,000 points; all collected pairs remain in the CSV. Histogram and Event counts vs time remain available under Chart type.
-
-COSI Explorer is an independent viewer; no endorsement by NASA or the COSI mission is implied. Observation data, calibration files, and other mission software are not included or relicensed by the project.
-
-## Homebrew
-
-A custom-tap cask generator is included. The DMG is distributed through GitHub Releases. A live `brew install --cask` command additionally requires a published custom tap; no tap is published yet. See [docs/HOMEBREW.md](HOMEBREW.md). Homebrew installs the same desktop app and does not replace Apple signing/notarization.
-
-## Try it without mission files
-
-Download the [synthetic demo](https://github.com/mwy-wing/COSI-FITS-EXPLORER/releases/download/v0.1.1/synthetic-events.fits) and open it with **Open file…**. Start with Column values, ENERGY, and Time; switch to Row number or Histogram. These invented values contain no observation data. See [the example notes](../examples/README.md) for its columns and generator.
-
-## Plot tools in v0.1.1
-
-Move the pointer near a displayed point to inspect X/Y at full plotted precision, its original 1-based row, and its stored time when available. Filters preserve source row numbers. For array columns, points retain their parent row after active-hit clipping and reduction. Hovering a histogram shows the bin interval, center, and plotted values/counts; an overlay adds B's value. The final bin includes the upper edge.
-
-Choose **Inspect** above the plot and click a displayed point to select its original row in the event table and open the Selection inspector. The app loads the correct table page automatically. Selected rows have an amber ring on their visible points; table selection also updates the ring. Histogram and event-count bins describe aggregated values and do not select individual rows. Above the table, choose **All rows** for the full source table or **Plotted rows** for the unique source rows behind the applied plot. Each row appears once, including rows that contribute multiple hits. This works with column plots, histograms, and event-count plots; overlays show rows from source A. The Row column and **Row #** jump always use original 1-based source numbers. In Plotted rows, a jump must name a contributing row; switch to All rows to inspect excluded rows. Table paging counts positions within the chosen list.
-
-Plotted rows follows the last successful plot's value/time/class/quality filters, array reduction, finite-value checks, and scan/collection limits. It includes collected values before the display's point thinning. Panning or zooming does not filter the table. Empty selections clear row/geometry/trace details and disable paging; All rows remains available.
-
-Choose **Box zoom** and drag a rectangle to zoom both axes. **Shift-drag** does the same from Inspect or Pan. **Pan** drags the X range without selecting a row; Inspect also supports dragging to pan. Scroll to zoom X around the pointer. **Back** (⌘[) returns to the preceding view; **Reset** (⌘0 or double-click) fits all plotted values. A reset can be undone with Back. Press **Escape** to cancel a drag. New plot data/settings clear navigation history. On logarithmic plots, the rectangle follows the displayed logarithmic Y scale while labels and exports retain the original Y units.
-
-Hover identifies displayed points within 12 screen points. Dense views retain the existing 50,000-point display limit; zoom in to inspect more of the collected points. Plot coordinates use double precision; the table and Selection inspector preserve exact integer identifiers.
-
-Use the toolbar's **Export plot** button for PNG, PDF, or CSV, or **File → Export Plot PNG/PDF…**. Figures include axis labels/units, the original source path, applied filters/reduction, visible X/Y ranges, logarithmic display state, scan limits, and overlay normalization. PNG is rendered at 2× resolution; PDF retains searchable text and vector plot drawing. Hover cards, selection rings, zoom rectangles, toolbar buttons, and the data table are excluded. The figure is captured when export starts, before the Save panel opens. Figure export is available for Explore's table plots; CSV export keeps the collected plotted values.
-
-On reopening, the app restores the last successfully loaded file/HDU, applied plot settings, X/Y viewport, All rows/Plotted rows table choice, window size/position, and library/inspector visibility. Source files are reopened read-only. Missing files or incompatible stored settings fall back to the usual empty/default view. Comparisons must be reopened separately. Settings are saved locally through macOS preferences; launch with `--no-restore` to skip workspace restoration and saving for that session. These plot tools are included in the v0.1.1 download.
-
-
-## Column summary
-
-Open the inspector's **Summary** tab to see the selected numeric column's minimum, maximum, median, mean, collected-value count, and contributing-row count. Statistics use the values accepted by the applied plot after active-hit clipping and array reduction, before histogram binning or display thinning. Column values mode summarizes Y; column comparison summarizes the selected X column from accepted pairs. Event-count mode summarizes the first accepted gate value per counted event, rather than timestamps or bin counts. Overlays summarize source A's original column values, independently of logarithmic display or unit-area count normalization.
-
-Non-finite values and empty rows are separate counts after class/quality/time cuts and before value gating. A reduced sum containing a non-finite input counts as one non-finite reduced value; a row with no active selected values counts as empty. Invalid declared hit counts are reported separately. These are counts of processed inputs within the scan/collection limits, not estimates for unscanned data. Partial scans are labeled. No accepted values produces unavailable statistics rather than zero.
-
-**Copy summary** copies the source path, units, full plotted numeric precision, applied settings/limits, statistics, and counts. Displayed statistics are rounded for readability. Calculations use the reader's double-precision values; exact integer identifiers remain available in the source table and Selection inspector. Zooming and table mode do not change a summary.
+[Demo data and generator](../examples/README.md) · [Icon source and renderer](../resources/README.md) · [Release history](https://github.com/mwy-wing/COSI-FITS-EXPLORER/releases)
