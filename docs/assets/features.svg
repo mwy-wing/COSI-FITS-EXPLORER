@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="174" viewBox="0 0 1280 174" role="img" aria-labelledby="title description">
+  <title id="title">Open. Explore. Export.</title>
+  <desc id="description">Open FITS tables and COSI event data. Explore time, row numbers, and histograms. Export figures and values as PNG, PDF, or CSV.</desc>
+  <g fill="#f3f6f8" stroke="#dce4e9" stroke-width="2">
+    <rect x="1" y="1" width="414" height="172" rx="14"/>
+    <rect x="433" y="1" width="414" height="172" rx="14"/>
+    <rect x="865" y="1" width="414" height="172" rx="14"/>
+  </g>
+  <g fill="none" stroke="#277c9d" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M32 49V31h26l13 13v43H32V49m26-18v13h13M41 57h20M41 67h20M41 77h12"/>
+    <path d="M464 32v55h56M476 72l10-15 12 6 17-26"/>
+    <path d="M905 68v19h49V68m-24-37v41m-13-13 13 13 13-13"/>
+  </g>
+  <g fill="#ee9b52">
+    <circle cx="476" cy="72" r="4"/><circle cx="486" cy="57" r="4"/>
+    <circle cx="498" cy="63" r="4"/><circle cx="515" cy="37" r="4"/>
+  </g>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <g fill="#193746" font-size="28" font-weight="700">
+      <text x="96" y="66">Open</text>
+      <text x="544" y="66">Explore</text>
+      <text x="977" y="66">Export</text>
+    </g>
+    <g fill="#526773" font-size="20">
+      <text x="32" y="131">FITS tables · images · event data</text>
+      <text x="464" y="131">Time · row number · histograms</text>
+      <text x="897" y="131">PNG · PDF · CSV</text>
+    </g>
+  </g>
+</svg>

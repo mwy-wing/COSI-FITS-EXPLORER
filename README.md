@@ -4,9 +4,11 @@
 
 [![macOS 15+](https://img.shields.io/badge/macOS-15%2B-193746?logo=apple&logoColor=white)](#download)
 [![Ubuntu 22.04 / 24.04](https://img.shields.io/badge/Ubuntu-22.04%20%7C%2024.04-E95420?logo=ubuntu&logoColor=white)](#download)
+[![C++17](https://img.shields.io/badge/C%2B%2B-17-277c9d?logo=cplusplus&logoColor=white)](CMakeLists.txt)
 [![Build and test](https://github.com/mwy-wing/COSI-FITS-EXPLORER/actions/workflows/build.yml/badge.svg)](https://github.com/mwy-wing/COSI-FITS-EXPLORER/actions/workflows/build.yml)
 [![v0.2.0](https://img.shields.io/badge/version-0.2.0-277c9d)](https://github.com/mwy-wing/COSI-FITS-EXPLORER/releases/tag/v0.2.0)
 [![MIT License](https://img.shields.io/badge/license-MIT-10b981)](LICENSE)
+[![Read-only data](https://img.shields.io/badge/data-read--only-193746)](docs/USER_GUIDE.md#data-scope-and-reopening)
 
 **[Download ↓](#download)** · [Try demo data](https://github.com/mwy-wing/COSI-FITS-EXPLORER/releases/download/v0.2.0/synthetic-events.fits) · [User guide](docs/USER_GUIDE.md) · [Report a bug](https://github.com/mwy-wing/COSI-FITS-EXPLORER/issues)
 
@@ -20,6 +22,8 @@ A desktop app for browsing FITS files, visualizing columns, and exploring COSI e
 
 ## What you can do
 
+![Open FITS and event data; explore time, rows, and histograms; export PNG, PDF, and CSV](docs/assets/features.svg)
+
 - **Inspect** FITS tables, headers, images, and supported COSI packet files.
 - **Plot** column values against stored time or original row number, with histograms and filters.
 - **Investigate** points and contributing rows, with zoom controls and column summaries.
@@ -28,14 +32,11 @@ A desktop app for browsing FITS files, visualizing columns, and exploring COSI e
 
 Your files stay on your computer and are opened **read-only**. Units and declared time references are preserved; this viewer applies no calibration or clock correction.
 
-<details>
-<summary><b>See the Linux desktop</b></summary>
+## On Linux, too
 
 ![COSI Explorer on Linux plotting synthetic event energy against time](docs/assets/linux.png)
 
 The Linux app includes plots, paged tables, headers, images, summaries, comparison, and event tools. Hit coordinates appear as text; the Mac app also has geometry projections and more workspace controls. [Platform details →](docs/USER_GUIDE.md#platforms)
-
-</details>
 
 ## Download
 
@@ -62,16 +63,40 @@ You can also launch **COSI Explorer** from the application menu. Other distribut
 2. Choose a table HDU, **Column values**, and a numeric value column such as **ENERGY**.
 3. Switch X between **Time** and **Row number**. Click a point to inspect its original row.
 
+### Choose your view
+
+| View | X axis | Y axis |
+| --- | --- | --- |
+| **Column values** | Stored time or original row number | Selected column value |
+| **Histogram** | Selected column value | Values per bin |
+| **Event counts vs time** | Stored time | Events per time bin |
+| **Column comparison** | Selected X column after reduction | First stored element of Y |
+
+Use **Plotted rows** to browse the source rows contributing to the current plot. **Summary** shows their collected values' minimum, maximum, median, and mean, with units and applied filters.
+
 <details>
 <summary><b>Build from source</b></summary>
 
 ```sh
 git clone https://github.com/mwy-wing/COSI-FITS-EXPLORER.git
 cd COSI-FITS-EXPLORER
-# macOS: install Xcode Command Line Tools, then:
+```
+
+**macOS:** install Xcode Command Line Tools, then:
+
+```sh
 brew install cmake pkg-config cfitsio
-# Ubuntu: use this instead of brew:
+```
+
+**Ubuntu:**
+
+```sh
 sudo apt install build-essential cmake pkg-config libcfitsio-dev qt6-base-dev libgl1-mesa-dev dpkg-dev
+```
+
+Then build and run the checks:
+
+```sh
 bash build.sh
 ```
 
