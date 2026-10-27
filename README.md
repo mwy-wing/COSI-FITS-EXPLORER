@@ -81,4 +81,4 @@ On Mac, open `dist/COSI Explorer.app`. On Linux, run `./build/cosi-explorer` or 
 
 ---
 
-[User guide](docs/USER_GUIDE.md) · [Releases](https://github.com/mwy-wing/COSI-FITS-EXPLORER/releases) · [Contributors](AUTHORS.md) · [MIT license](LICENSE)
+[User guide](docs/USER_GUIDE.md) · [Releases](https://github.com/mwy-wing/COSI-FITS-EXPLORER/releases) · [MIT license](LICENSE)

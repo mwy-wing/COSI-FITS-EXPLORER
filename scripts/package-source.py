@@ -12,7 +12,7 @@ output = Path(sys.argv[1] if len(sys.argv) > 1 else source / 'dist').resolve()
 output.mkdir(parents=True, exist_ok=True)
 version = re.search(r'project\(COSIExplorer VERSION ([^ ]+)', (source / 'CMakeLists.txt').read_text())[1]
 files = [source / name for name in (
-    '.gitignore', 'AUTHORS.md', 'CMakeLists.txt', 'Info.plist', 'LICENSE', 'THIRD_PARTY_NOTICES.txt',
+    '.gitignore', 'CMakeLists.txt', 'Info.plist', 'LICENSE', 'THIRD_PARTY_NOTICES.txt',
     'README.md', 'CHANGELOG.md', 'build.sh', 'release.sh')]
 for folder in ('src', 'tests', 'docs', 'scripts', 'examples'):
     files.extend(path for path in (source / folder).rglob('*') if path.is_file() and path.suffix in ('.cpp', '.hpp', '.mm', '.md', '.sh', '.py'))
