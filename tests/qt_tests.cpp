@@ -26,6 +26,14 @@ int main(int argc,char** argv) {
         auto* mode=w.findChild<QComboBox*>("mode");auto* rows=w.findChild<QComboBox*>("rows");
         auto* eventClass=w.findChild<QSpinBox*>("eventClass");auto* table=w.findChild<QTableWidget*>("table");
         require(column&&axis&&mode&&rows&&eventClass&&table,"Named UI controls exist");
+        require(!axis->isHidden()&&w.findChild<QComboBox*>("yColumn")->isHidden()&&w.findChild<QSpinBox*>("bins")->isHidden(),"Series view shows only its relevant axis controls");
+        const QSize originalSize=w.size();w.resize(1080,740);QCoreApplication::processEvents();
+        require(w.size()==QSize(1080,740),"UI fits the supported compact window size");
+        auto* settings=w.findChild<QScrollArea*>("settingsScroll");auto* apply=w.findChild<QPushButton*>("apply");
+        settings->ensureWidgetVisible(apply);QCoreApplication::processEvents();
+        require(settings->viewport()->rect().contains(apply->mapTo(settings->viewport(),apply->rect().center())),"Apply remains reachable by scrolling compact settings");
+        if(auto path=qEnvironmentVariable("COSI_QT_SCREENSHOT");!path.isEmpty())w.grab().save(QFileInfo(path).dir().filePath("linux-compact.png"));
+        w.resize(originalSize);QCoreApplication::processEvents();
         const double energy=w.appliedPlot().summary.mean;
         column->setCurrentIndex(column->findText("EVENTID",Qt::MatchStartsWith));wait(w);
         require(w.lastError().isEmpty()&&w.appliedPlot().yLabel.find("EVENTID")!=std::string::npos,"Changing column replaces applied plot");
@@ -49,6 +57,7 @@ int main(int argc,char** argv) {
         auto* yColumn=w.findChild<QComboBox*>("yColumn");yColumn->setCurrentIndex(yColumn->findText("ENERGY",Qt::MatchStartsWith));wait(w);
         require(w.appliedPlot().scatter&&w.appliedPlot().yLabel.find("ENERGY")!=std::string::npos,"Scatter Y selection applies automatically");
         mode->setCurrentIndex(1);wait(w);
+        require(axis->isHidden()&&w.findChild<QComboBox*>("yColumn")->isHidden()&&!w.findChild<QSpinBox*>("bins")->isHidden(),"Histogram exposes bins and hides point-axis selectors");
         require(!w.appliedPlot().scatter&&w.appliedPlot().x.size()==128,"Histogram mode computes bins");
         for(QString ext:{"csv","png","pdf"}){QString path=out.filePath("plot."+ext);require(w.exportPlot(path),"Plot export succeeds");require(QFileInfo(path).size()>100,"Export is nonempty");}
         QFile csv(out.filePath("plot.csv"));csv.open(QIODevice::ReadOnly);auto bytes=csv.readAll();
@@ -80,9 +89,24 @@ int main(int argc,char** argv) {
                      int(chart->height()-65-(plot.y[i]-lo)/(hi-lo)*(chart->height()-117)));
         QTest::mouseClick(chart,Qt::LeftButton,Qt::NoModifier,point);wait(w);
         require(w.selectedRow()>0,"Click on displayed point reveals a source row");
+        minimum->setText("10000");w.applyPlot();wait(w);
+        require(w.appliedPlot().accepted==0,"Reset test begins with an empty filtered view");
+        QTest::mouseClick(w.findChild<QPushButton*>("resetFilters"),Qt::LeftButton);wait(w);
+        require(w.lastError().isEmpty()&&w.appliedPlot().accepted==1200&&minimum->text().isEmpty()&&eventClass->value()==-1,"Reset filters recomputes the unfiltered plot");
+        auto* tabs=w.findChild<QTabWidget*>();tabs->setCurrentIndex(2);QCoreApplication::processEvents();
+        QTest::mouseClick(w.findChild<QPushButton*>("copySummary"),Qt::LeftButton);
+        require(QApplication::clipboard()->text().contains("ENERGY [keV]")&&QApplication::clipboard()->text().contains(QString::number(w.appliedPlot().summary.median,'g',17)),"Summary copies full double precision, column and units");
+        if(auto path=qEnvironmentVariable("COSI_QT_SCREENSHOT");!path.isEmpty())w.grab().save(QFileInfo(path).dir().filePath("linux-summary.png"));
         auto before=w.appliedPlot().accepted;
         require(w.openFile(out.filePath("missing.fits")),"Missing file error handled asynchronously");wait(w);
         require(!w.lastError().isEmpty()&&w.appliedPlot().accepted==before,"Open error leaves previous workspace usable");
+        // A FITS table without a supported time field must still plot against rows.
+        auto noTime=out.filePath("no-time.fits");require(QFile::copy(argv[1],noTime),"Copy fallback fixture");
+        fitsfile* changed=nullptr;int changedStatus=0;fits_open_file(&changed,noTime.toUtf8().constData(),READWRITE,&changedStatus);
+        fits_movabs_hdu(changed,2,nullptr,&changedStatus);char unsupportedTime[]="GPS_SECONDS";
+        fits_update_key(changed,TSTRING,"TTYPE2",unsupportedTime,nullptr,&changedStatus);fits_close_file(changed,&changedStatus);
+        require(changedStatus==0,"Prepare FITS with unsupported time field");w.openFile(noTime);wait(w);
+        require(w.lastError().isEmpty()&&w.appliedPlot().accepted==1200&&w.appliedPlot().xLabel=="Row number (1-based)","Missing supported time defaults to the original row axis");
         // Image HDUs use a separate worker/rendering path and clear old table state.
         fitsfile* image=nullptr;int status=0;long axes[2]={8,8};double pixels[64];
         for(int j=0;j<64;++j)pixels[j]=j;

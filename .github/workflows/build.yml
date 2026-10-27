@@ -24,7 +24,7 @@ jobs:
           persist-credentials: false
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y cmake pkg-config libcfitsio-dev qt6-base-dev libgl1-mesa-dev xvfb xauth desktop-file-utils
+        run: sudo apt-get update && sudo apt-get install -y cmake pkg-config libcfitsio-dev qt6-base-dev libgl1-mesa-dev file xvfb xauth desktop-file-utils
       - name: Install macOS dependencies
         if: runner.os == 'macOS'
         run: brew install cmake pkg-config cfitsio

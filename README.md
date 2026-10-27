@@ -91,7 +91,7 @@ brew install cmake pkg-config cfitsio
 **Ubuntu:**
 
 ```sh
-sudo apt install build-essential cmake pkg-config libcfitsio-dev qt6-base-dev libgl1-mesa-dev dpkg-dev
+sudo apt install build-essential cmake pkg-config libcfitsio-dev qt6-base-dev libgl1-mesa-dev dpkg-dev file
 ```
 
 Then build and run the checks:

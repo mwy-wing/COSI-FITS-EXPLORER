@@ -13,13 +13,13 @@
 using namespace cosi;
 static NSString* S(const std::string& s) { return [[NSString alloc] initWithBytes:s.data() length:s.size() encoding:NSUTF8StringEncoding] ?: @"[invalid UTF-8]"; }
 static NSColor* RGB(int r,int g,int b) { return [NSColor colorWithSRGBRed:r/255. green:g/255. blue:b/255. alpha:1]; }
-static NSColor* bg() { return RGB(245,247,250); }
+static NSColor* bg() { return RGB(243,246,248); }
 static NSColor* panel() { return RGB(255,255,255); }
-static NSColor* ink() { return RGB(31,41,57); }
-static NSColor* muted() { return RGB(111,123,142); }
-static NSColor* accent() { return RGB(66,100,235); }
-static NSColor* edge() {return RGB(226,231,239);}
-static NSColor* chartGrid() {return RGB(235,238,244);}
+static NSColor* ink() { return RGB(25,55,70); }
+static NSColor* muted() { return RGB(82,103,115); }
+static NSColor* accent() { return RGB(39,124,157); }
+static NSColor* edge() {return RGB(220,228,233);}
+static NSColor* chartGrid() {return RGB(231,236,239);}
 static NSString* countString(uint64_t n){NSNumberFormatter* f=[NSNumberFormatter new];f.numberStyle=NSNumberFormatterDecimalStyle;return [f stringFromNumber:@(n)];}
 static std::string tick(double value) {std::ostringstream out;out<<std::setprecision(5)<<value;return out.str();}
 static void text(NSString* t,NSRect rect,CGFloat size,NSColor* c,BOOL mono=NO) {
@@ -53,10 +53,10 @@ static NSTextView* reader() {
 @implementation MetricStrip
 - (BOOL)isFlipped{return YES;}
 - (void)drawRect:(NSRect)dirty {
-    [panel()setFill];NSRectFill(self.bounds);NSArray* names=@[@"Product",self.rowLabel?:@"Rows",@"Fields",@"File size"];
+    [panel()setFill];NSRectFill(self.bounds);NSArray* names=@[@"HDU",self.rowLabel?:@"Rows",@"Columns",@"File size"];
     CGFloat w=self.bounds.size.width/4;
     for(int i=0;i<4;++i){CGFloat x=i*w+18;text(names[i],NSMakeRect(x,11,w-36,16),11,muted());
-        text(self.values.count>NSUInteger(i)?self.values[i]:@"—",NSMakeRect(x,31,w-30,29),i==0?18:22,ink());
+        text(self.values.count>NSUInteger(i)?self.values[i]:@"—",NSMakeRect(x,28,w-30,25),i==0?16:20,ink());
         if(i)line(NSMakePoint(i*w,14),NSMakePoint(i*w,self.bounds.size.height-14),edge());}
 }
 @end
@@ -99,7 +99,7 @@ static NSTextView* reader() {
     if((self=[super initWithFrame:frame])){
         _glyph=[NSImageView new];_glyph.contentTintColor=accent();_glyph.image=[NSImage imageWithSystemSymbolName:@"doc.text" accessibilityDescription:@"Data file"];
         _nameLabel=label(@"",12,ink());_nameLabel.font=[NSFont systemFontOfSize:12 weight:NSFontWeightMedium];_pathLabel=label(@"",10,muted());_pathLabel.lineBreakMode=NSLineBreakByTruncatingHead;
-        _badge=label(@"FITS",9,accent());_badge.alignment=NSTextAlignmentCenter;_badge.font=[NSFont systemFontOfSize:9 weight:NSFontWeightSemibold];_badge.wantsLayer=YES;_badge.layer.cornerRadius=4;_badge.layer.backgroundColor=RGB(231,237,254).CGColor;
+        _badge=label(@"FITS",9,accent());_badge.alignment=NSTextAlignmentCenter;_badge.font=[NSFont systemFontOfSize:9 weight:NSFontWeightSemibold];_badge.wantsLayer=YES;_badge.layer.cornerRadius=4;_badge.layer.backgroundColor=RGB(228,240,245).CGColor;
         for(NSView* v in @[_glyph,_nameLabel,_pathLabel,_badge])[self addSubview:v];self.textField=_nameLabel;
     }return self;
 }
@@ -473,7 +473,7 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     PlotOptions _lastOptions;
     MetricStrip* _metrics;Surface *_inspectorPanel,*_settingsContent;
     NSScrollView *_settingsScroll,*_summaryScroll;NSSegmentedControl* _inspectorMode;
-    ColumnSummaryView* _columnSummary;NSButton* _copySummary;
+    ColumnSummaryView* _columnSummary;NSButton* _copySummary;NSButton* _resetFilters;NSTextField* _accessBadge;
     NSArray<NSTextField*>* _settingsLabels;
     NSTextField *_eventTitle,*_eventCaption,*_libraryTitle,*_filesHeading,*_traceDetailsHeading;
     NSImageView *_brandGlyph,*_fileGlyph;
@@ -499,13 +499,13 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     _window.title=@"COSI Explorer";_window.subtitle=@"Mission data workspace";_window.minSize=NSMakeSize(1150,780);_window.delegate=self;_window.backgroundColor=bg();_window.toolbarStyle=NSWindowToolbarStyleUnifiedCompact;_window.titlebarAppearsTransparent=YES;
     _surface=[Surface new];_surface.fill=bg();_window.contentView=_surface;__weak Explorer* weak=self;
     _surface.onResize=^{[weak layout];};_surface.onDrop=^(NSString* p){[weak openPath:p];};[_surface registerForDraggedTypes:@[NSPasteboardTypeFileURL]];
-    _sidebar=[Surface new];_sidebar.fill=RGB(239,242,248);[_surface addSubview:_sidebar];
+    _sidebar=[Surface new];_sidebar.fill=RGB(235,242,244);[_surface addSubview:_sidebar];
     _brand=label(@"COSI Explorer",16,ink());_brand.font=[NSFont systemFontOfSize:16 weight:NSFontWeightSemibold];
     _tagline=label(@"Mission data workspace",11,muted());_rootLabel=label(_root,11,ink());
     _rootButton=button(@"Choose folder…",self,@selector(chooseRoot:));_openButton=button(@"Open file…",self,@selector(chooseFile:));
     _search=[NSSearchField new];_search.placeholderString=@"Search name or relative path";_search.delegate=self;
     _fileTypes=[[NSSegmentedControl alloc]initWithFrame:NSZeroRect];[_fileTypes setSegmentCount:3];[_fileTypes setLabel:@"FITS" forSegment:0];[_fileTypes setLabel:@"L0" forSegment:1];[_fileTypes setLabel:@"All" forSegment:2];_fileTypes.selectedSegment=0;_fileTypes.target=self;_fileTypes.action=@selector(filterFiles:);
-    _fileTable=[self tableWithIdentifier:@"files"];_fileTable.headerView=nil;_fileTable.rowHeight=62;_fileTable.intercellSpacing=NSMakeSize(0,2);_fileTable.style=NSTableViewStyleSourceList;_fileTable.backgroundColor=RGB(239,242,248);_fileTable.doubleAction=@selector(openSelectedFile:);_fileTable.target=self;
+    _fileTable=[self tableWithIdentifier:@"files"];_fileTable.headerView=nil;_fileTable.rowHeight=62;_fileTable.intercellSpacing=NSMakeSize(0,2);_fileTable.style=NSTableViewStyleSourceList;_fileTable.backgroundColor=RGB(235,242,244);_fileTable.doubleAction=@selector(openSelectedFile:);_fileTable.target=self;
     NSTableColumn* fc=[[NSTableColumn alloc]initWithIdentifier:@"file"];fc.width=310;[_fileTable addTableColumn:fc];_fileScroll=scroll(_fileTable);
     _catalogStatus=label(@"Indexing data files…",10,muted());
     for(NSView* v in @[_brand,_tagline,_rootLabel,_rootButton,_openButton,_search,_fileTypes,_fileScroll,_catalogStatus])[_sidebar addSubview:v];
@@ -566,9 +566,12 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
 }
 - (NSPopUpButton*)popup:(NSArray*)titles action:(SEL)action {NSPopUpButton* p=[NSPopUpButton new];[p addItemsWithTitles:titles];if(action){p.target=self;p.action=action;}return p;}
 - (void)buildWorkspace {
+    _accessBadge=label(@"Read only",10,accent());_accessBadge.alignment=NSTextAlignmentCenter;_accessBadge.font=[NSFont systemFontOfSize:10 weight:NSFontWeightSemibold];
+    _accessBadge.wantsLayer=YES;_accessBadge.layer.cornerRadius=10;_accessBadge.layer.backgroundColor=RGB(228,240,245).CGColor;
+    _accessBadge.toolTip=@"Source files are opened read-only. Original units and declared time references are preserved; no clock or attitude correction is applied.";[_surface addSubview:_accessBadge];
     _metrics=[MetricStrip new];_metrics.values=@[@"—",@"—",@"—",@"—"];card(_metrics);[_surface addSubview:_metrics];
     _brandGlyph=[NSImageView new];_brandGlyph.image=NSApp.applicationIconImage;_brandGlyph.toolTip=@"COSI Explorer";[_sidebar addSubview:_brandGlyph];
-    _fileGlyph=[NSImageView new];_fileGlyph.image=[NSImage imageWithSystemSymbolName:@"doc.text.fill" accessibilityDescription:@"Current data file"];_fileGlyph.contentTintColor=accent();_fileGlyph.wantsLayer=YES;_fileGlyph.layer.backgroundColor=RGB(231,237,254).CGColor;_fileGlyph.layer.cornerRadius=9;[_surface addSubview:_fileGlyph];
+    _fileGlyph=[NSImageView new];_fileGlyph.image=[NSImage imageWithSystemSymbolName:@"doc.text.fill" accessibilityDescription:@"Current data file"];_fileGlyph.contentTintColor=accent();_fileGlyph.wantsLayer=YES;_fileGlyph.layer.backgroundColor=RGB(228,240,245).CGColor;_fileGlyph.layer.cornerRadius=9;[_surface addSubview:_fileGlyph];
     _libraryTitle=label(@"LIBRARY",10,muted());_libraryTitle.font=[NSFont systemFontOfSize:10 weight:NSFontWeightSemibold];[_sidebar addSubview:_libraryTitle];
     _filesHeading=label(@"DATA FILES",10,muted());_filesHeading.font=[NSFont systemFontOfSize:10 weight:NSFontWeightSemibold];[_sidebar addSubview:_filesHeading];
     _rootButton.title=@"Change…";_rootButton.controlSize=NSControlSizeSmall;_rootButton.toolTip=@"Choose the data library folder";
@@ -589,6 +592,8 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     for(NSView* v in @[_mode,_x,_y,_seriesAxis,_reduce,_bins,_log,_filterLabel,_min,_max,_tmin,_tmax,_class,_clean,_overlayButton,_overlayHDU,_normalize,_clearOverlay,_overlayLabel])[_settingsContent addSubview:v];
     for(NSView* v in @[_plotButton,_detailLabel,_detailScroll])[_inspectorPanel addSubview:v];
     NSMutableArray* labels=[NSMutableArray array];for(NSString* title in @[@"Chart type",@"Column",@"Y column",@"Array values",@"Bins",@"Value range",@"Time range",@"Event class",@"Compare spectra",@"X axis"]){NSTextField* l=label(title,11,muted());[_settingsContent addSubview:l];[labels addObject:l];}_settingsLabels=labels;
+    _resetFilters=button(@"Reset",self,@selector(resetFilters:));_resetFilters.controlSize=NSControlSizeSmall;_resetFilters.toolTip=@"Clear value/time cuts, event class, and quality selection; then update the plot.";[_settingsContent addSubview:_resetFilters];
+    for(NSSegmentedControl* control in @[_fileTypes,_tabs,_plotInteraction,_tableMode,_inspectorMode])control.selectedSegmentBezelColor=accent();
     _filterLabel.stringValue=@"Filters";_filterLabel.font=[NSFont systemFontOfSize:13 weight:NSFontWeightSemibold];_filterLabel.textColor=ink();
     for(NSTextField* f in @[_min,_tmin])f.placeholderString=@"Minimum";for(NSTextField* f in @[_max,_tmax])f.placeholderString=@"Maximum";
     _min.toolTip=@"Minimum plotted/gate value in the selected column's unit";_max.toolTip=@"Maximum plotted/gate value in the selected column's unit";
@@ -652,7 +657,7 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     if(!_canvas||!_metrics)return;
     CGFloat W=_surface.bounds.size.width,H=_surface.bounds.size.height,L=_sidebarHidden?0:260,x=L+24,w=W-x-24;
     BOOL explore=_tabs.selectedSegment==0;
-    CGFloat inspector=explore&&!_inspectorHidden?286:0,cw=w-(inspector?inspector+16:0),top=218;
+    CGFloat inspector=explore&&!_inspectorHidden?286:0,cw=w-(inspector?inspector+16:0),top=200;
     _sidebar.hidden=_sidebarHidden;_sidebar.frame=NSMakeRect(0,0,L,H);
     _brandGlyph.frame=NSMakeRect(19,22,24,27);_brand.frame=NSMakeRect(52,20,L-66,25);_tagline.frame=NSMakeRect(52,47,L-66,18);
     _libraryTitle.frame=NSMakeRect(18,91,100,17);_rootButton.frame=NSMakeRect(L-91,85,77,27);
@@ -660,9 +665,9 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     _search.frame=NSMakeRect(16,151,L-32,29);_fileTypes.frame=NSMakeRect(17,191,L-34,25);_filesHeading.frame=NSMakeRect(18,234,L-36,16);
     _fileScroll.frame=NSMakeRect(6,258,L-12,std::max(80.,H-344));_fileTable.tableColumns.firstObject.width=std::max(160.,L-15);
     _catalogStatus.frame=NSMakeRect(18,H-78,L-36,18);_openButton.frame=NSMakeRect(13,H-47,L-26,32);
-    _fileGlyph.frame=NSMakeRect(x,20,39,43);_title.frame=NSMakeRect(x+52,19,w-54,27);_subtitle.frame=NSMakeRect(x+53,51,w-55,18);_summary.hidden=YES;
-    _metrics.frame=NSMakeRect(x,86,w,74);_metrics.needsDisplay=YES;
-    _tabs.frame=NSMakeRect(x-2,178,std::min(454.,w-257),29);_hduChoice.frame=NSMakeRect(x+w-243,177,246,30);
+    _fileGlyph.frame=NSMakeRect(x,20,39,43);_title.frame=NSMakeRect(x+52,19,w-160,27);_accessBadge.frame=NSMakeRect(x+w-85,25,85,22);_subtitle.frame=NSMakeRect(x+53,51,w-55,18);_summary.hidden=YES;
+    _metrics.frame=NSMakeRect(x,80,w,64);_metrics.needsDisplay=YES;
+    _tabs.frame=NSMakeRect(x-2,160,std::min(454.,w-257),29);_hduChoice.frame=NSMakeRect(x+w-243,159,246,30);
     CGFloat chartH=std::clamp((H-200)*.47,270.,360.);
     _plotInteraction.frame=NSMakeRect(x-2,top,210,26);_zoomBack.frame=NSMakeRect(x+216,top-2,78,30);_zoomReset.frame=NSMakeRect(x+298,top-2,70,30);
     BOOL tools=explore&&_canvas.contentMode==0;for(NSView* v in @[_plotInteraction,_zoomBack,_zoomReset])v.hidden=!tools;
@@ -682,22 +687,26 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     _plotButton.frame=NSMakeRect(13,ih-50,iw-26,34);_copySummary.frame=_plotButton.frame;
     _summaryScroll.frame=NSMakeRect(0,54,iw,ih-113);_columnSummary.frame=NSMakeRect(0,0,iw,std::max(660.,ih-113));
     CGFloat y=8,fw=iw-32;
-    auto group=[&](int index,NSView* control){_settingsLabels[index].frame=NSMakeRect(16,y,fw,16);control.frame=NSMakeRect(13,y+19,fw+6,29);y+=61;};
+    auto group=[&](int index,NSView* control){_settingsLabels[index].frame=NSMakeRect(16,y,fw,16);control.frame=NSMakeRect(13,y+19,fw+6,29);y+=58;};
     BOOL series=_mode.indexOfSelectedItem==3;group(0,_mode);
     _seriesAxis.hidden=!series;_settingsLabels[9].hidden=!series;if(series)group(9,_seriesAxis);
-    _settingsLabels[1].stringValue=series?@"Y column":@"Column";_settingsLabels[3].stringValue=series?@"Y array values":@"Array values";_settingsLabels[5].stringValue=series?@"Y value range":@"Value range";group(1,_x);
+    _settingsLabels[1].stringValue=series?@"Y column":_mode.indexOfSelectedItem==2?@"X column":_mode.indexOfSelectedItem==1?@"Value gate":@"Column";_settingsLabels[3].stringValue=series?@"Y array values":@"Array values";_settingsLabels[5].stringValue=series?@"Y value range":@"Value range";group(1,_x);
     BOOL scatter=_mode.indexOfSelectedItem==2;_y.hidden=!scatter;_settingsLabels[2].hidden=!scatter;if(scatter)group(2,_y);
     group(3,_reduce);BOOL binned=!series&&!scatter;_bins.hidden=!binned;_log.hidden=!binned;_settingsLabels[4].hidden=!binned;
     if(binned){_settingsLabels[4].frame=NSMakeRect(16,y,83,16);_bins.frame=NSMakeRect(16,y+19,83,27);_log.frame=NSMakeRect(121,y+20,120,24);y+=62;}
-    _filterLabel.frame=NSMakeRect(16,y,fw,22);y+=34;
+    _filterLabel.frame=NSMakeRect(16,y,fw-72,22);_resetFilters.frame=NSMakeRect(iw-78,y-3,63,26);y+=34;
     _settingsLabels[5].frame=NSMakeRect(16,y,fw,16);_min.frame=NSMakeRect(16,y+20,(fw-8)/2,27);_max.frame=NSMakeRect(20+fw/2,y+20,(fw-8)/2,27);y+=62;
     _settingsLabels[6].frame=NSMakeRect(16,y,fw,16);_tmin.frame=NSMakeRect(16,y+20,(fw-8)/2,27);_tmax.frame=NSMakeRect(20+fw/2,y+20,(fw-8)/2,27);y+=62;
-    group(7,_class);_clean.frame=NSMakeRect(16,y-4,fw,25);y+=43;
-    _settingsLabels[8].font=[NSFont systemFontOfSize:13 weight:NSFontWeightSemibold];_settingsLabels[8].textColor=ink();_settingsLabels[8].frame=NSMakeRect(16,y,fw,22);y+=31;
-    _overlayButton.frame=NSMakeRect(12,y,fw+8,31);y+=39;
-    _overlayLabel.frame=NSMakeRect(16,y,fw,30);_overlayLabel.stringValue=_overlayData?S(std::filesystem::path(_overlayData->path).filename().string()):@"Overlay a second file to compare runs.";y+=38;
-    _overlayHDU.hidden=!_overlayData;_normalize.hidden=!_overlayData;_clearOverlay.hidden=!_overlayData;
-    if(_overlayData){_overlayHDU.frame=NSMakeRect(13,y,fw+6,28);y+=37;_normalize.frame=NSMakeRect(16,y,132,25);_clearOverlay.frame=NSMakeRect(iw-82,y-2,68,28);y+=39;}
+    _class.hidden=!_class.enabled;_settingsLabels[7].hidden=!_class.enabled;if(_class.enabled)group(7,_class);
+    _clean.hidden=!_clean.enabled;if(_clean.enabled){_clean.frame=NSMakeRect(16,y-4,fw,25);y+=35;}
+    BOOL histogram=_mode.indexOfSelectedItem==0;_settingsLabels[8].hidden=!histogram;_overlayButton.hidden=!histogram;_overlayLabel.hidden=!histogram;
+    _overlayHDU.hidden=!histogram||!_overlayData;_normalize.hidden=!histogram||!_overlayData;_clearOverlay.hidden=!histogram||!_overlayData;
+    if(histogram){
+        _settingsLabels[8].font=[NSFont systemFontOfSize:13 weight:NSFontWeightSemibold];_settingsLabels[8].textColor=ink();_settingsLabels[8].frame=NSMakeRect(16,y,fw,22);y+=31;
+        _overlayButton.frame=NSMakeRect(12,y,fw+8,31);y+=39;
+        _overlayLabel.frame=NSMakeRect(16,y,fw,30);_overlayLabel.stringValue=_overlayData?S(std::filesystem::path(_overlayData->path).filename().string()):@"Overlay a second file to compare runs.";y+=38;
+        if(_overlayData){_overlayHDU.frame=NSMakeRect(13,y,fw+6,28);y+=37;_normalize.frame=NSMakeRect(16,y,132,25);_clearOverlay.frame=NSMakeRect(iw-82,y-2,68,28);y+=39;}
+    }
     _settingsContent.frame=NSMakeRect(0,0,iw,y+16);
     _headerScroll.frame=NSMakeRect(x,top,w,H-top-42);_header.frame=NSMakeRect(0,0,w,std::max(H-top-42,_header.frame.size.height));
     _traceLabel.frame=NSMakeRect(x,top+1,w-258,24);_traceButton.frame=NSMakeRect(x+w-252,top-3,126,29);_chooseL0.frame=NSMakeRect(x+w-119,top-3,122,29);
@@ -723,7 +732,7 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     if(!_data)return;for(size_t row=0;row<_visible.size();++row)if(_files[_visible[row]].path==_data->path){_syncingCatalog=YES;[_fileTable selectRowIndexes:[NSIndexSet indexSetWithIndex:row] byExtendingSelection:NO];[_fileTable scrollRowToVisible:row];_syncingCatalog=NO;break;}
 }
 - (void)setBusy:(BOOL)busy message:(NSString*)message {
-    _busy=busy;_columnSummary.updating=busy;_columnSummary.needsDisplay=YES;_copySummary.enabled=!busy&&_hasAppliedPlot;if(busy)[_canvas cancelInteraction];[self updatePlotTools];[self updateTableTools];_plotButton.enabled=!busy;_status.toolTip=message;
+    _busy=busy;_columnSummary.updating=busy;_columnSummary.needsDisplay=YES;_copySummary.enabled=!busy&&_hasAppliedPlot;if(busy)[_canvas cancelInteraction];[self updatePlotTools];[self updateTableTools];_plotButton.enabled=!busy;_resetFilters.enabled=!busy;_status.toolTip=message;
     _status.stringValue=!busy&&_data&&[message isEqualToString:S(_data->notes)]&&![message containsString:@"WARNING"]?@"Read only  ·  Original units and timestamps":message;
     if(busy)[_spinner startAnimation:nil];else[_spinner stopAnimation:nil];
 }
@@ -809,6 +818,7 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     }else {[self setBusy:NO message:@"Primary HDU has no pixels. Choose a table extension or inspect Header."];[self rememberWorkspace];}
 }
 - (void)modeChanged:(id)sender {
+    if(_mode.indexOfSelectedItem>=2){_log.state=NSControlStateValueOff;_canvas.logY=NO;}
     _y.enabled=_mode.indexOfSelectedItem==2;[self layout];
     // Tab/layout synchronization calls this with nil; only a user action recomputes.
     if(sender){if(_mode.indexOfSelectedItem!=0&&_overlayData)[self clearOverlay:nil];else [self updatePlot:sender];}
@@ -823,6 +833,11 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     [self modeChanged:nil];[self layout];_canvas.needsDisplay=YES;
     [self inspectorChanged:nil];
     if(trace)[self refreshTrace:nil];
+}
+- (void)resetFilters:(id)sender {
+    if(_busy||!_data)return;
+    for(NSTextField* field in @[_min,_max,_tmin,_tmax])field.stringValue=@"";
+    [_class selectItemAtIndex:0];_clean.state=NSControlStateValueOff;[self updatePlot:sender];
 }
 - (void)toggleLog:(id)sender {_canvas.logY=_log.state==NSControlStateValueOn;_canvas.needsDisplay=YES;}
 - (double)optionalNumber:(NSTextField*)f {
@@ -1308,7 +1323,10 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     }else if(_smokeStep==27){
         if(_canvas->plot.scatter||!_canvas->plot.sourceRows.empty()||_plottedRows->empty()||_plottedRows->size()!=_canvas->plot.accepted||!_pageFiltered)throw std::runtime_error("Event-count bins must retain unique contributing rows without claiming per-bin row identity");
         if(_canvas->plot.summary.count!=_expectedToolsSummary.count||_canvas->plot.summary.mean!=_expectedToolsSummary.mean||_canvas->plot.summary.median!=_expectedToolsSummary.median)throw std::runtime_error("Event-count summary must retain accepted gate values rather than time bins");
-        [self checkSummaryInspector:@"14-lightcurve-summary.png"];[self savePreview:@"09-lightcurve-rows.png"];[self restoreWorkspaceControls:_toolsWorkspace];[self updatePlot:nil];_smokeStep=5;
+        [self checkSummaryInspector:@"14-lightcurve-summary.png"];[self savePreview:@"09-lightcurve-rows.png"];[NSApp sendAction:_resetFilters.action to:_resetFilters.target from:_resetFilters];_smokeStep=28;
+    }else if(_smokeStep==28){
+        if(_canvas->plot.accepted!=1200||_class.indexOfSelectedItem!=0||_clean.state!=NSControlStateValueOff||_min.stringValue.length||_max.stringValue.length||_tmin.stringValue.length||_tmax.stringValue.length)throw std::runtime_error("Reset filters must clear all cuts and recompute the plot");
+        [self restoreWorkspaceControls:_toolsWorkspace];[self updatePlot:nil];_smokeStep=5;
     }else{
         [self rememberWorkspace];[_preferences synchronize];[self checkRestoredToolsState];
         [@"PASS: applied column summaries, independent median/range, copied precision/units/filters, empty statistics, normalized overlays and event-count gate summaries; filtered row paging/jumps, source identities, rapid table-mode changes, empty-result recovery, aggregate/overlay source-A rows, and table-mode restoration; native click selects original rows across table pages and rapid requests; rectangle zoom on both axes, reverse/Shift/clamped/tiny/cancel gestures, Pan, Back/Reset, log zoom, compact controls; native hover target/action shows full-precision plotted values and original row/time provenance; filtered row provenance; bin hover with overlays; PNG/PDF snapshots of time/row/log-overlay/normalized-overlay plots; viewer note separation; saved applied workspace and X/Y viewport.\n" writeToFile:[_smokeDir stringByAppendingPathComponent:@"ui-result.txt"] atomically:YES encoding:NSUTF8StringEncoding error:nil];[NSApp terminate:nil];return;

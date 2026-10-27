@@ -17,7 +17,7 @@ files = [source / name for name in (
 for folder in ('src', 'tests', 'docs', 'scripts', 'examples'):
     files.extend(path for path in (source / folder).rglob('*') if path.is_file() and path.suffix in ('.cpp', '.hpp', '.mm', '.md', '.sh', '.py'))
 # Include only the reviewed public README artwork and synthetic-data preview.
-files.extend(source / name for name in ('resources/README.md', 'resources/COSIExplorer.svg', 'resources/COSIExplorer.png', 'resources/COSIExplorer.icns', 'docs/assets/overview.png', 'docs/assets/banner.svg', 'docs/assets/features.svg', 'docs/assets/demo.gif', 'examples/synthetic-events.fits', '.github/workflows/build.yml', 'resources/linux/cosi-explorer.desktop', 'docs/assets/linux.png'))
+files.extend(source / name for name in ('resources/README.md', 'resources/COSIExplorer.svg', 'resources/COSIExplorer.png', 'resources/chevron-down.svg', 'resources/chevron-down.png', 'resources/COSIExplorer.icns', 'docs/assets/overview.png', 'docs/assets/banner.svg', 'docs/assets/features.svg', 'docs/assets/demo.gif', 'examples/synthetic-events.fits', '.github/workflows/build.yml', 'resources/linux/cosi-explorer.desktop', 'docs/assets/linux.png'))
 archive = output / f'COSI-Explorer-v{version}-source.zip'
 with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as bundle:
     for path in sorted(files):

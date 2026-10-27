@@ -30,6 +30,8 @@ Column, chart type, reduction, class, and quality selections update automaticall
 | Event counts vs time | One count per row when at least one reduced gate value passes the cuts. Choose a scalar gate such as TIME or EVENTID to include rows irrespective of hit multiplicity. Counts have no exposure correction. |
 | Column comparison | Selected reduction on X and the first stored element on Y. This is not paired per-hit correlation. |
 
+Use **Reset filters** to clear value/time ranges, class, and quality cuts in one step while keeping the chart and columns. Controls for unrelated chart modes and unsupported class/quality fields are hidden. The Linux settings sidebar scrolls in smaller windows.
+
 **All elements**, **First element**, and **Sum row / hits** control array reduction. Recognized hit fields honor NUMHIT/NUMSTRIPHIT, excluding padded slots. Empty active arrays or non-finite active inputs contribute no sum. PHA/TAC remain uncalibrated channels. Value filters act on the selected column after reduction; in Column values this is Y.
 
 - **Inspect:** hover near a displayed point for its values/source row, or click to reveal that row and all fields. Aggregate-bin hover shows the bin interval/counts, without assigning an individual event.
@@ -47,11 +49,13 @@ Log Y displays histogram values as log10(1+y). Zooming and display thinning do n
 
 Non-finite items and empty rows are counted after class/quality/time cuts and before value gating. A sum containing a non-finite active input counts as one invalid reduced value; no active values counts as an empty row. Invalid hit-count rows are separate. No accepted values produces unavailable statistics, rather than zero. **Copy summary** includes full plotted precision, units, source, settings, and limits. Calculations use double precision; the table/Selection inspector preserve exact integer identifiers.
 
+On Linux, Summary also has statistic cards and **Copy summary**, with full precision and units. An amber ring marks the selected row’s displayed points.
+
 Use **Export plot** for PNG, PDF, or CSV. Figures include axes/units, sources, applied filters, visible X/Y ranges, scan limits, and overlay normalization. PNG is 2× resolution; PDF retains searchable text/vector drawing. Hover cards, selection rings, zoom rectangles, and UI controls are excluded. The figure is captured before the Save panel opens. CSV retains collected plot values, not a raw-table export; histograms export bin centers/counts.
 
 ## Compare spectra
 
-Open source A, choose Histogram and its column/reduction, then **Overlay file…** for B. Select B's HDU when necessary. Both spectra use shared bin edges and matching declared column units; mismatches are rejected rather than converted. Time-gated comparisons also require compatible declared time references. **Unit area** normalizes counts for shape comparison; it does not correct exposure. A is blue and B is orange. Clear removes the overlay.
+Open source A, choose Histogram and its column/reduction, then **Overlay file…** for B. Select B's HDU when necessary. Both spectra use shared bin edges and matching declared column units; mismatches are rejected rather than converted. Time-gated comparisons also require compatible declared time references. **Unit area** normalizes counts for shape comparison; it does not correct exposure. A is teal and B is orange. Clear removes the overlay.
 
 ## Trace an event
 

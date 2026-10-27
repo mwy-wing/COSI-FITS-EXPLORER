@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Consistent ink and teal styling, clearer file context, and compact controls on Mac and Linux.
+- Reset filters on both platforms; context-sensitive Linux axis controls and scrollable settings.
+- Linux summary cards, full-precision summary copying, and selected-point highlights.
+
 ## [0.2.0](https://github.com/mwy-wing/COSI-FITS-EXPLORER/releases/tag/v0.2.0) — 2026-10-27
 
 - Linux graphical app with Qt: plots, filters, tables, headers, images, summaries, comparisons, event reports, and exports.

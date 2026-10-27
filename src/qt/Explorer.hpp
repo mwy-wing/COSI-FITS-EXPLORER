@@ -2,10 +2,11 @@
 #include "Data.hpp"
 #include <QMainWindow>
 #include <functional>
+#include <array>
 
 class QComboBox; class QLineEdit; class QCheckBox; class QSpinBox;
 class QTableWidget; class QPlainTextEdit; class QLabel; class QPushButton;
-class QTabWidget; class QSplitter;
+class QTabWidget; class QSplitter; class QFormLayout; class QAction;
 namespace cosi::qt {
 class Chart;
 class Explorer : public QMainWindow {
@@ -43,6 +44,8 @@ private:
     void inspectEvent(bool trace);
     void refreshPlot();
     void updatePaging();
+    void updateControls();
+    void resetFilters();
     PlotOptions options() const;
     QString figureMetadata() const;
     void fail(const QString&);
@@ -61,7 +64,11 @@ private:
     QCheckBox *clean_, *log_, *normalize_;
     QTableWidget* table_;
     QPlainTextEdit *header_, *details_, *summary_, *event_;
-    QLabel *fileLabel_, *plotLabel_, *pageLabel_;
+    QLabel *fileLabel_, *fileSubtitle_, *plotLabel_, *pageLabel_, *summaryHeading_;
+    std::array<QLabel*,4> datasetMetrics_, datasetCaptions_;
+    std::array<QLabel*,8> summaryMetrics_;
+    QFormLayout *plotForm_, *filterForm_;
+    QAction *clearComparison_;
     QPushButton *previous_, *next_;
     QTabWidget* tabs_;
     QSplitter *body_, *plots_;
