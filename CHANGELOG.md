@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/mwy-wing/COSI-FITS-EXPLORER/releases/tag/v0.2.0) — 2026-10-27
+
+- Linux graphical app with Qt: plots, filters, tables, headers, images, summaries, comparisons, event reports, and exports.
+- Ubuntu 22.04 and 24.04 amd64 installers with application-menu launchers and system-managed dependencies.
+- Linux GUI regression tests, X11 checks, package installation checks, and CI download artifacts.
+- Expanded visual README with platform downloads and a real Linux preview.
+
 ## [0.1.1](https://github.com/mwy-wing/COSI-FITS-EXPLORER/releases/tag/v0.1.1) — 2026-10-27
 
 - Point inspection and linked original-row selection.

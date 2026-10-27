@@ -12,7 +12,7 @@ cmake "${cmake_args[@]}"
 cmake --build "$build_dir" -j "${COSI_BUILD_JOBS:-4}"
 ctest --test-dir "$build_dir" --output-on-failure
 if [[ "$(uname -s)" != Darwin ]]; then
-  printf 'Built the C++ reader, CLI, and tests. The desktop app requires macOS.\n'
+  bash "$source_dir/scripts/package-linux.sh" "$build_dir" "$output_dir"
   exit 0
 fi
 mkdir -p "$output_dir"

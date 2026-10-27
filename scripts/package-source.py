@@ -17,12 +17,12 @@ files = [source / name for name in (
 for folder in ('src', 'tests', 'docs', 'scripts', 'examples'):
     files.extend(path for path in (source / folder).rglob('*') if path.is_file() and path.suffix in ('.cpp', '.hpp', '.mm', '.md', '.sh', '.py'))
 # Include only the reviewed public README artwork and synthetic-data preview.
-files.extend(source / name for name in ('resources/README.md', 'resources/COSIExplorer.svg', 'resources/COSIExplorer.png', 'resources/COSIExplorer.icns', 'docs/assets/overview.png', 'docs/assets/banner.svg', 'docs/assets/demo.gif', 'examples/synthetic-events.fits', '.github/workflows/build.yml'))
+files.extend(source / name for name in ('resources/README.md', 'resources/COSIExplorer.svg', 'resources/COSIExplorer.png', 'resources/COSIExplorer.icns', 'docs/assets/overview.png', 'docs/assets/banner.svg', 'docs/assets/demo.gif', 'examples/synthetic-events.fits', '.github/workflows/build.yml', 'resources/linux/cosi-explorer.desktop', 'docs/assets/linux.png'))
 archive = output / f'COSI-Explorer-v{version}-source.zip'
 with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as bundle:
     for path in sorted(files):
         bundle.write(path, f'cosi-explorer-{version}/{path.relative_to(source)}')
-artifacts = sorted(path for path in output.glob(f'COSI-Explorer-v{version}-*') if path.suffix in ('.zip', '.dmg'))
+artifacts = sorted(path for path in output.glob(f'COSI-Explorer-v{version}-*') if path.suffix in ('.zip', '.dmg', '.deb'))
 # A separate demo asset lets binary users try the app without building sources.
 demo = output / 'synthetic-events.fits'
 shutil.copyfile(source / 'examples/synthetic-events.fits', demo)

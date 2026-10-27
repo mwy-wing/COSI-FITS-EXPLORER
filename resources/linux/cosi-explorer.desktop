@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=COSI Explorer
+Comment=Explore FITS tables and COSI event data
+Exec=cosi-explorer %f
+Icon=cosi-explorer
+Terminal=false
+Categories=Science;Astronomy;DataVisualization;
+MimeType=application/fits;image/fits;
+Keywords=FITS;COSI;astronomy;spectrum;
+StartupNotify=true

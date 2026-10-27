@@ -1,4 +1,4 @@
-CFITSIO 4.6.3
+CFITSIO (the Mac bundle includes 4.6.3; Linux uses the distribution package)
 https://heasarc.gsfc.nasa.gov/docs/software/fitsio/
 
 Copyright (Unpublished--all rights reserved under the copyright laws of
@@ -35,3 +35,18 @@ COSI/Nuclearizer readers as references. Nuclearizer and other mission tools
 are not bundled or linked with this app and retain their own licenses.
 Observation data and calibration products are not included or licensed by
 this project.
+
+
+Qt 6 (Linux graphical interface)
+https://www.qt.io/licensing/
+https://doc.qt.io/qt-6/lgpl.html
+
+The Linux executable dynamically links the system Qt 6 Core, Gui, Widgets,
+and Concurrent modules, available under LGPLv3 (or a commercial license).
+Qt libraries are supplied by Ubuntu packages, not bundled in our .deb.
+Their license/copyright notices and corresponding source are available
+through the distribution, for example /usr/share/doc/libqt6core6/copyright
+and `apt source qt6-base` with source repositories enabled. The application
+source and build instructions allow rebuilding against a modified Qt.
+No restriction on reverse engineering for debugging such modifications
+is imposed. COSI Explorer's own source remains MIT licensed.
