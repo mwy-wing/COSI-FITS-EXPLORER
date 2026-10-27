@@ -25,7 +25,7 @@ COSI Explorer v$version
 Requires an Apple Silicon Mac with macOS 15 or later.
 No Homebrew, compiler, or CFITSIO installation is needed.
 
-This initial build is locally ad-hoc signed, not Developer ID signed or
+This build is locally ad-hoc signed, not Developer ID signed or
 Apple notarized. Downloaded copies may be blocked by Gatekeeper. A DMG does
 not remove that requirement. Use the trusted project release/source and
 consult Apple's guidance: https://support.apple.com/en-us/102445

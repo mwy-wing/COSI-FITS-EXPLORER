@@ -4,18 +4,18 @@ COSI Explorer is a desktop app, so the Homebrew route is a **cask**. A custom ta
 
 ## Current status
 
-The v0.1.0 DMG is built locally. A cask generator is included and the release folder contains a draft cask using a prepared release URL. The download URL and tap must be published under your real account before an installation command will work. Homebrew does not bypass Gatekeeper or notarization.
+The v0.1.1 DMG is distributed through GitHub Releases. A cask generator is included, but no custom tap has been published. A tap must be published before an installation command will work. Homebrew does not bypass Gatekeeper or notarization.
 
 ## Publish a custom tap
 
-1. Publish the app repository and its v0.1.0 GitHub Release. Attach the final `COSI-Explorer-v0.1.0-macos-arm64.dmg` without changing it afterward.
+1. Use the app repository and its v0.1.1 GitHub Release. Keep the attached `COSI-Explorer-v0.1.1-macos-arm64.dmg` unchanged.
 2. Create a public repository named `homebrew-tap` under your GitHub account.
 3. In a local checkout of that tap, create `Casks/cosi-explorer.rb` with the included generator. From the app source folder, run the following, replacing the tap checkout path:
 
 ```sh
 python3 scripts/make-homebrew-cask.py \
   --repo mwy-wing/COSI-FITS-EXPLORER \
-  --dmg dist/COSI-Explorer-v0.1.0-macos-arm64.dmg \
+  --dmg dist/COSI-Explorer-v0.1.1-macos-arm64.dmg \
   --output /path/to/homebrew-tap/Casks/cosi-explorer.rb
 ```
 
@@ -26,7 +26,7 @@ python3 scripts/make-homebrew-cask.py \
 brew install --cask mwy-wing/tap/cosi-explorer
 ```
 
-This is not a working command until the release assets and custom tap are published. Users do not need to install CFITSIO separately. Future cask versions can be installed with `brew upgrade --cask cosi-explorer` after the tap is updated. There is no built-in in-app auto-updater in v0.1.0.
+This is not a working command until the custom tap is published. Users do not need to install CFITSIO separately. Future cask versions can be installed with `brew upgrade --cask cosi-explorer` after the tap is updated. There is no built-in in-app auto-updater in v0.1.1.
 
 The draft cask is not submitted to the main Homebrew catalog. For distribution now, use the DMG directly. For a smooth first launch, complete Developer ID signing/notarization before finalizing the DMG and generating its checksum/cask.
 

@@ -1,6 +1,6 @@
-# Validation for v0.1.0
+# Validation
 
-This is the first public release. Earlier local prototype labels do not represent published releases.
+Public releases began at v0.1.0. The historical preparation checks are retained below, followed by the v0.1.1 checks. Earlier local prototype labels do not represent published releases.
 
 ## Reproducible checks
 
@@ -81,3 +81,10 @@ The native public-fixture regression switches between All rows and Plotted rows,
 Fixture tests cover odd/even medians, means/ranges, finite zeros, null/infinite inputs, overflow-safe means, empty statistics, active-hit clipping, reductions, invalid hit-count rows, partial scans, and light-curve gate values rather than timestamps. Computing a summary preserves the original point order. The native public-fixture harness checks an independently sorted median/range, the Summary tab, full-precision text with units/settings, combined filters, unavailable empty statistics, source-A normalized overlays, and event-count gate summaries. It builds summary copy text without changing the user's clipboard. The existing paging/selection, plot navigation, figure exports, and restart checks remain included.
 
 The replacement icon is original geometric SVG/native drawing, not generated raster imagery. Its renderer shares coordinates between SVG and PNG and renders all ten standard/Retina representations before iconutil builds the ICNS. The master and 32-pixel version were visually inspected, along with the actual Summary inspector. The app uses the packaged ICNS for both its Dock icon and library glyph; bundle build number is 8. The README banner follows the same flat palette and mark. Icon sources and regeneration scripts are included in the source archive; published v0.1.0 assets remain unchanged.
+
+
+## v0.1.1 release preparation — 2026-10-27
+
+A fresh release build passed all three CTest suites. The exact packaged release app passed the public synthetic native regression, including summaries/copy text, source-row tables, empty-result recovery, overlays, zoom navigation, figure exports, and restoration on a second launch. No mission dataset was used. The source ZIP was independently extracted, configured and built, and its three CTest suites passed.
+
+The compressed DMG passed hdiutil verification and was mounted read-only without opening Finder. Its app and a separate clean extraction of the app ZIP passed strict deep signature verification; both report v0.1.1, build 8, arm64 and macOS 15 minimum. CFITSIO and license notices are bundled; other executable dependencies are system libraries/frameworks. The mounted image contained the app, an Applications symlink and installation instructions, and was ejected after verification. All four manifest entries matched SHA-256. No application was installed into /Applications. The signature is ad-hoc; this release is not Developer ID signed or notarized. Previous v0.1.0 assets are preserved.

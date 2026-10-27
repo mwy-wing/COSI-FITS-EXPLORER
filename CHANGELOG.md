@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.1 — in development
+## 0.1.1 — 2026-10-27
 
 - Summary inspector with column range, median, mean, collected/input counts, and full-precision copy text.
 - Explicit partial-scan/collection scope and limits in plot settings and summaries.

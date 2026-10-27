@@ -1,6 +1,6 @@
-# Releasing COSI Explorer v0.1.0
+# Releasing COSI Explorer
 
-The first public release is v0.1.0. Earlier prototype labels were local iterations. This folder is the repository root; it contains source, MIT licensing, CFITSIO notices, tests, and build/release scripts. The repository owner's existing MIT copyright notice names WingYeung Ma. Equal project credit with ChatGPT is documented in AUTHORS.md.
+The first public release was v0.1.0; the current release instructions use v0.1.1. Earlier prototype labels were local iterations. This folder is the repository root; it contains source, MIT licensing, CFITSIO notices, tests, and build/release scripts. The repository owner's existing MIT copyright notice names WingYeung Ma. Equal project credit with ChatGPT is documented in AUTHORS.md.
 
 ## Create the local release
 
@@ -10,12 +10,12 @@ On an Apple Silicon Mac with Xcode Command Line Tools, CMake, pkg-config, CFITSI
 bash release.sh
 ```
 
-This runs both CTest suites and creates:
+This runs all three CTest suites and creates:
 
 - `dist/COSI Explorer.app`
-- `dist/COSI-Explorer-v0.1.0-macos-arm64.zip`
-- `dist/COSI-Explorer-v0.1.0-macos-arm64.dmg` (app, Applications link, install instructions)
-- `dist/COSI-Explorer-v0.1.0-source.zip`
+- `dist/COSI-Explorer-v0.1.1-macos-arm64.zip`
+- `dist/COSI-Explorer-v0.1.1-macos-arm64.dmg` (app, Applications link, install instructions)
+- `dist/COSI-Explorer-v0.1.1-source.zip`
 - `dist/SHA256SUMS.txt`
 
 To verify, run `cd dist`, then `shasum -a 256 -c SHA256SUMS.txt`. The manifest records filenames relative to the asset directory.
@@ -28,8 +28,8 @@ The release targets macOS 15+. The bundled CFITSIO here has a macOS 15 deploymen
 
 1. The source repository is `mwy-wing/COSI-FITS-EXPLORER`. Keep its existing MIT license and history when preparing future changes.
 2. Upload the contents of the source archive, or initialize Git in this source folder. Review `git status` before adding files; generated data, screenshots, build output, and archives are ignored.
-3. Commit the source, tag the commit `v0.1.0`, and push it to your repository.
-4. On GitHub, open **Releases → Draft a new release**, select `v0.1.0`, paste the notes from `docs/RELEASE_NOTES_v0.1.0.md`, and attach the DMG, binary ZIP, and checksum file. The source ZIP is also available if you want to attach it; GitHub generates tagged source archives automatically.
+3. Commit the source, tag the commit `v0.1.1`, and push it to your repository.
+4. On GitHub, open **Releases → Draft a new release**, select `v0.1.1`, paste the notes from `docs/RELEASE_NOTES_v0.1.1.md`, and attach the DMG, binary ZIP, and checksum file. The source ZIP is also available if you want to attach it; GitHub generates tagged source archives automatically.
 5. Preview the draft and publish it when the source, platform requirements, and signing status are correct.
 
 For a fresh checkout of the source repository:
@@ -39,6 +39,8 @@ git clone git@github.com:mwy-wing/COSI-FITS-EXPLORER.git
 cd COSI-FITS-EXPLORER
 bash release.sh
 ```
+
+Run `bash tests/check-plot-tools.sh "dist/COSI Explorer.app"` in a macOS GUI session to exercise the public synthetic fixture, native plot/table interactions, summaries, figure exports, and workspace restoration before publishing.
 
 Keep future release tags on the corresponding tested source commit, and never overwrite a published version tag. Push new commits and the new version tag before attaching release assets.
 
@@ -57,7 +59,7 @@ COSI_SIGN_IDENTITY='Developer ID Application: YOUR NAME (TEAMID)' bash release.s
 After setting up a notarytool Keychain profile named COSI_NOTARY, submit the ZIP:
 
 ```sh
-xcrun notarytool submit dist/COSI-Explorer-v0.1.0-macos-arm64.zip --keychain-profile COSI_NOTARY --wait
+xcrun notarytool submit dist/COSI-Explorer-v0.1.1-macos-arm64.zip --keychain-profile COSI_NOTARY --wait
 ```
 
 Only after Apple returns Accepted, staple and verify the ticket, recreate the ZIP from the stapled app, and regenerate checksums:
@@ -67,7 +69,7 @@ xcrun stapler staple "dist/COSI Explorer.app"
 xcrun stapler validate "dist/COSI Explorer.app"
 codesign --verify --deep --strict "dist/COSI Explorer.app"
 spctl --assess --type execute --verbose "dist/COSI Explorer.app"
-ditto --norsrc --noextattr -c -k --keepParent "dist/COSI Explorer.app" dist/COSI-Explorer-v0.1.0-macos-arm64.zip
+ditto --norsrc --noextattr -c -k --keepParent "dist/COSI Explorer.app" dist/COSI-Explorer-v0.1.1-macos-arm64.zip
 bash scripts/create-dmg.sh dist
 python3 scripts/package-source.py dist
 ```
@@ -82,7 +84,7 @@ Update the version in CMakeLists.txt and Info.plist, increase CFBundleVersion, u
 
 The DMG is the primary desktop download: open it, drag the app to Applications, then eject the image. It contains no installer scripts. The image is compressed and read-only. A disk image does not provide a trusted Developer ID signature or notarization by itself.
 
-For a future `brew install --cask` route, publish the final DMG and a custom tap as described in [HOMEBREW.md](HOMEBREW.md). Rebuild the DMG from the stapled app ZIP after notarization, regenerate checksums, and generate the cask from that final DMG. The application repository URL is configured; the custom Homebrew tap still needs publication. The v0.1.0 binary assets are available on [GitHub Releases](https://github.com/mwy-wing/COSI-FITS-EXPLORER/releases/tag/v0.1.0).
+For a future `brew install --cask` route, publish the final DMG and a custom tap as described in [HOMEBREW.md](HOMEBREW.md). Rebuild the DMG from the stapled app ZIP after notarization, regenerate checksums, and generate the cask from that final DMG. The application repository URL is configured; the custom Homebrew tap still needs publication. The v0.1.1 binary assets are available on [GitHub Releases](https://github.com/mwy-wing/COSI-FITS-EXPLORER/releases/tag/v0.1.1).
 
 ## Automated checks
 

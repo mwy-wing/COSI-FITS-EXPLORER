@@ -4,9 +4,9 @@
 
 ## The workspace
 
-The toolbar provides Open, Compare spectra, Export CSV, and library/inspector toggles. The file header summarizes the selected product, row/event/packet count, field count, and file size.
+The toolbar provides Open, Compare spectra, Export plot (PNG/PDF/CSV), and library/inspector toggles. The file header summarizes the selected product, row/event/packet count, field count, and file size.
 
-In **Explore**, the right inspector has two tabs: **Plot settings** contains plot controls, filters, and comparison-file controls (scroll for additional settings); **Selection** contains the selected event's full fields or the comparison report. **Apply to plot** is fixed at the bottom of the settings inspector. Column, chart-type, array-reduction, event-class, and quality selections update the plot automatically. Use Apply to plot or Command-Return after editing bins or numeric ranges; Command-0 resets plot zoom. The View menu can hide the library or inspector to give plots and tables more room.
+In **Explore**, the right inspector has three tabs: **Plot** contains plot controls, filters, and comparison-file controls (scroll for additional settings); **Selection** contains the selected event's full fields or the comparison report; **Summary** describes the applied column values. **Apply to plot** is fixed at the bottom of the settings inspector. Column, chart-type, array-reduction, event-class, and quality selections update the plot automatically. Use Apply to plot or Command-Return after editing bins or numeric ranges; Command-0 resets plot zoom. The View menu can hide the library or inspector to give plots and tables more room.
 
 In **Trace event**, click a processing-stage card to inspect that stage's record and match context, then use **Open stage row** to navigate. The cards retain distinct matched, candidate, missing-event, and selected-source states. Full field values remain selectable text below the cards.
 
@@ -14,7 +14,7 @@ In **Trace event**, click a processing-stage card to inspect that stage's record
 
 - The catalog searches relative paths as well as filenames. Its FITS / L0 / All buttons narrow the list. Select a file to open it. Use Choose folder again to refresh an updated directory.
 - Select an HDU from the popup to inspect event tables, telemetry tables, spacecraft attitude/orbit tables, or an image plane.
-- **Explore** combines a plot with a paged, horizontally scrollable table. The table always displays **raw, unfiltered rows**. Arrow buttons change pages; **Row # / Go** jumps to a 1-based row. Select a row for all column values in the inspector.
+- **Explore** combines a plot with a paged, horizontally scrollable table. Choose **All rows** for the full source table or **Plotted rows** for unique rows contributing to the applied plot. Arrow buttons change pages; **Row # / Go** jumps to an original 1-based source row. Select a row for all column values in the inspector.
 - **Header** shows the selected HDU's FITS cards, including units and time-reference metadata. For L0 it shows framing, APID counts, sequence jumps, and decoder notes.
 - **Hit geometry** shows X/Y, X/Z, Y/Z projections for the selected calibrated event. Choose the event in Explore first. Connections appear only when `SEQHIT` is a valid 1…NUMHIT permutation. Raw readout IDs are not interpreted as positions.
 
@@ -112,13 +112,13 @@ COSI Explorer is an independent viewer; no endorsement by NASA or the COSI missi
 
 ## Homebrew
 
-A custom-tap cask generator is included. A live `brew install --cask` command requires publishing the final DMG to a public release and publishing a tap under your real GitHub account; neither has been published yet. See [docs/HOMEBREW.md](HOMEBREW.md). Homebrew installs the same desktop app and does not replace Apple signing/notarization.
+A custom-tap cask generator is included. The DMG is distributed through GitHub Releases. A live `brew install --cask` command additionally requires a published custom tap; no tap is published yet. See [docs/HOMEBREW.md](HOMEBREW.md). Homebrew installs the same desktop app and does not replace Apple signing/notarization.
 
 ## Try it without mission files
 
-Download the [synthetic demo](https://github.com/mwy-wing/COSI-FITS-EXPLORER/releases/download/v0.1.0/synthetic-events.fits) and open it with **Open file…**. Start with Column values, ENERGY, and Time; switch to Row number or Histogram. These invented values contain no observation data. See [the example notes](../examples/README.md) for its columns and generator.
+Download the [synthetic demo](https://github.com/mwy-wing/COSI-FITS-EXPLORER/releases/download/v0.1.1/synthetic-events.fits) and open it with **Open file…**. Start with Column values, ENERGY, and Time; switch to Row number or Histogram. These invented values contain no observation data. See [the example notes](../examples/README.md) for its columns and generator.
 
-## Plot tools in v0.1.1 (current source and local build)
+## Plot tools in v0.1.1
 
 Move the pointer near a displayed point to inspect X/Y at full plotted precision, its original 1-based row, and its stored time when available. Filters preserve source row numbers. For array columns, points retain their parent row after active-hit clipping and reduction. Hovering a histogram shows the bin interval, center, and plotted values/counts; an overlay adds B's value. The final bin includes the upper edge.
 
@@ -132,7 +132,7 @@ Hover identifies displayed points within 12 screen points. Dense views retain th
 
 Use the toolbar's **Export plot** button for PNG, PDF, or CSV, or **File → Export Plot PNG/PDF…**. Figures include axis labels/units, the original source path, applied filters/reduction, visible X/Y ranges, logarithmic display state, scan limits, and overlay normalization. PNG is rendered at 2× resolution; PDF retains searchable text and vector plot drawing. Hover cards, selection rings, zoom rectangles, toolbar buttons, and the data table are excluded. The figure is captured when export starts, before the Save panel opens. Figure export is available for Explore's table plots; CSV export keeps the collected plotted values.
 
-On reopening, the app restores the last successfully loaded file/HDU, applied plot settings, X/Y viewport, All rows/Plotted rows table choice, window size/position, and library/inspector visibility. Source files are reopened read-only. Missing files or incompatible stored settings fall back to the usual empty/default view. Comparisons must be reopened separately. Settings are saved locally through macOS preferences; launch with `--no-restore` to skip workspace restoration and saving for that session. The published v0.1.0 download does not include these new plot tools.
+On reopening, the app restores the last successfully loaded file/HDU, applied plot settings, X/Y viewport, All rows/Plotted rows table choice, window size/position, and library/inspector visibility. Source files are reopened read-only. Missing files or incompatible stored settings fall back to the usual empty/default view. Comparisons must be reopened separately. Settings are saved locally through macOS preferences; launch with `--no-restore` to skip workspace restoration and saving for that session. These plot tools are included in the v0.1.1 download.
 
 
 ## Column summary
