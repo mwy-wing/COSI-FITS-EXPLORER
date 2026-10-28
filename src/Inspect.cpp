@@ -1,9 +1,27 @@
 #include "Data.hpp"
+#include "Validation.hpp"
 #include <filesystem>
 #include <iostream>
 int main(int argc,char** argv) {
-    if(argc<2){std::cerr<<"Usage: cosi-inspect FILE [--plot COLUMN | --trace EVENTID | --compare FILE [--normalize]]\n";return 2;}
+    if(argc<2){std::cerr<<"Usage: cosi-inspect FILE [--plot COLUMN | --trace EVENTID | --compare FILE [--normalize] | --validate [--profile auto|l1a|l1b|l2] [--delivery] [--json|--csv] [--output REPORT]]\n";return 2;}
     try{
+        if(argc>=3&&std::string(argv[2])=="--validate") {
+            cosi::ValidationOptions options;std::string output,format="text";
+            for(int i=3;i<argc;++i){std::string arg=argv[i];
+                if(arg=="--delivery")options.delivery=true;
+                else if(arg=="--json")format="json";
+                else if(arg=="--csv")format="csv";
+                else if(arg=="--output"&&i+1<argc)output=argv[++i];
+                else if(arg=="--profile"&&i+1<argc){std::string p=argv[++i];if(p=="auto")options.profile=cosi::ArchiveProfile::Auto;else if(p=="l1a")options.profile=cosi::ArchiveProfile::GeDL1a;else if(p=="l1b")options.profile=cosi::ArchiveProfile::GeDL1b;else if(p=="l2")options.profile=cosi::ArchiveProfile::GeDL2;else throw std::runtime_error("Profile must be auto, l1a, l1b or l2");}
+                else throw std::runtime_error("Unknown/incomplete validation option: "+arg);
+            }
+            auto report=cosi::validateArchiveFile(argv[1],options);
+            if(!output.empty())cosi::saveValidationReport(report,output);
+            std::cout<<(format=="json"?cosi::validationJSON(report):format=="csv"?cosi::validationCSV(report):cosi::validationText(report));
+            if(report.count(cosi::CheckStatus::Fail))return 1;
+            if(!report.scanComplete||!report.applicable)return 2;
+            return report.count(cosi::CheckStatus::Review)||report.count(cosi::CheckStatus::NotChecked)?3:0;
+        }
         auto d=cosi::openDataset(argv[1]);
         if(argc>=4&&std::string(argv[2])=="--trace"){
             for(size_t i=0;i<d->hdus.size();++i)if(cosi::findColumn(d->hdus[i],"EVENTID")>=0){auto rows=cosi::findEventRows(*d,i,argv[3]);

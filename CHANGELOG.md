@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Archive Compliance view on Mac and Linux with daily GeD L1a/L1b/L2 and GTI draft profiles.
+- Shared read-only header/schema/unit/checksum/row checks, full-scan coverage, cancellation and bounded issue samples.
+- Source SHA256, rule references, JSON/CSV/text reports, and direct source-header/original-row navigation.
+- CLI validation with explicit failure, incomplete, and review exit codes; synthetic compliance regressions.
+
 - Consistent ink and teal styling, clearer file context, and compact controls on Mac and Linux.
 - Reset filters on both platforms; context-sensitive Linux axis controls and scrollable settings.
 - Linux summary cards, full-precision summary copying, and selected-point highlights.

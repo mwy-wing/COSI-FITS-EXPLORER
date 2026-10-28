@@ -32,7 +32,7 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
       - name: Build readers, desktop app, and tests
         run: cmake --build build --parallel 3
-      - name: Test readers, workflows, and public demo
+      - name: Test readers, compliance, workflows, and public demo
         run: ctest --test-dir build --output-on-failure
       - name: Compile demo generator and check overwrite protection
         shell: bash
@@ -73,4 +73,5 @@ jobs:
           path: |
             dist/*.deb
             build/linux.png
+            build/linux-compliance.png
           if-no-files-found: error

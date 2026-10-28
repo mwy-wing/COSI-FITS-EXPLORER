@@ -1,17 +1,19 @@
 #pragma once
 #include "Data.hpp"
+#include "Validation.hpp"
 #include <QMainWindow>
 #include <functional>
 #include <array>
 
 class QComboBox; class QLineEdit; class QCheckBox; class QSpinBox;
 class QTableWidget; class QPlainTextEdit; class QLabel; class QPushButton;
-class QTabWidget; class QSplitter; class QFormLayout; class QAction;
+class QTimer; class QTabWidget; class QSplitter; class QFormLayout; class QAction;
 namespace cosi::qt {
 class Chart;
 class Explorer : public QMainWindow {
 public:
     explicit Explorer(bool restore = true);
+    ~Explorer() override { if(validationControl_)validationControl_->cancel=true; }
     bool openFile(const QString& path);
     bool busy() const { return busy_; }
     QString lastError() const { return error_; }
@@ -20,6 +22,8 @@ public:
     long long selectedRow() const { return selectedRow_; }
     bool exportPlot(const QString& path);
     void applyPlot();
+    void validateCurrentFile();
+    const ValidationReport* complianceReport() const { return validationReport_.get(); }
 protected:
     void closeEvent(QCloseEvent*) override;
     void dragEnterEvent(QDragEnterEvent*) override;
@@ -32,10 +36,16 @@ private:
         Plot plot;
         Image image;
         Comparison comparison;
+        std::shared_ptr<ValidationReport> validation;
         QString text;
     };
     bool run(const QString&, std::function<Result()>, std::function<void(Result)>);
     void chooseFile();
+    void buildCompliance();
+    void showCompliance();
+    void openComplianceFinding();
+    void navigateComplianceFinding();
+    void exportCompliance();
     void selectHDU(int);
     void readTable(long long offset = 0, long long reveal = -1);
     void selectRow(int);
@@ -72,5 +82,18 @@ private:
     QPushButton *previous_, *next_;
     QTabWidget* tabs_;
     QSplitter *body_, *plots_;
+    QWidget* compliancePage_;
+    QTableWidget* complianceTable_;
+    QPlainTextEdit* complianceDetail_;
+    QComboBox *complianceProfile_, *complianceFilter_;
+    QCheckBox* deliveryMode_;
+    QLabel* complianceLabel_;
+    QPushButton *validationCancel_, *validationRun_, *validationOpen_, *validationExport_;
+    QString validationPath_;
+    std::shared_ptr<ValidationControl> validationControl_;
+    std::shared_ptr<ValidationReport> validationReport_;
+    std::shared_ptr<Finding> pendingCompliance_;
+    QTimer* validationTimer_;
+    bool validationRunning_ = false;
 };
 }

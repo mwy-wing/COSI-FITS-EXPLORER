@@ -57,6 +57,13 @@ cosi-explorer
 
 You can also launch **COSI Explorer** from the application menu. Other distributions and Linux ARM builds are not packaged yet. [All release files and checksums →](https://github.com/mwy-wing/COSI-FITS-EXPLORER/releases/tag/v0.2.0)
 
+<details>
+<summary><b>Coming next: archive compliance (development build)</b></summary>
+
+The main branch includes a Compliance view for GeD L1a/L1b/L2 + GTI draft profiles: schemas, units, checksums, full-row checks, and JSON/CSV reports with source navigation. Draft conflicts and unchecked requirements are explicit. [Scope and usage →](docs/USER_GUIDE.md#archive-compliance)
+
+</details>
+
 ## Your first plot
 
 1. Open your file or the [synthetic demo](https://github.com/mwy-wing/COSI-FITS-EXPLORER/releases/download/v0.2.0/synthetic-events.fits).

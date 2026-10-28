@@ -116,10 +116,20 @@ int main(int argc,char** argv) {
         require(status==0,"Synthetic image fixture writes");w.openFile(imagePath);wait(w);
         require(w.lastError().isEmpty()&&w.visiblePage().rows.empty(),"Image opens and clears old table/plot");
         require(w.appliedPlot().x.empty(),"Image does not retain a stale column plot");
+        // Drive the real Compliance controls using a synthetic file with known faults.
+        auto bad=out.filePath("compliance-faults.fits");QProcess maker;maker.start(QApplication::applicationDirPath()+"/cosi-validation-tests",{"--write-faulty-fixture",bad});require(maker.waitForFinished(15000)&&maker.exitCode()==0,"Create compliance UI fixture");
+        w.openFile(bad);wait(w);w.validateCurrentFile();wait(w);
+        require(w.complianceReport()&&w.complianceReport()->scanComplete&&w.complianceReport()->count(cosi::CheckStatus::Fail)>0&&w.complianceReport()->count(cosi::CheckStatus::Review)>0,"Compliance UI shows failures and honest draft status");
+        auto* findings=w.findChild<QTableWidget*>("complianceTable");auto* jumpFinding=w.findChild<QPushButton*>("openComplianceFinding");require(findings&&jumpFinding,"Compliance table and source action exist");
+        auto selectRule=[&](const std::string& rule){for(int row=0;row<findings->rowCount();++row){size_t i=findings->item(row,0)->data(Qt::UserRole).toULongLong();if(w.complianceReport()->findings[i].rule==rule&&w.complianceReport()->findings[i].status==cosi::CheckStatus::Fail){findings->selectRow(row);return true;}}return false;};
+        require(selectRule("COLUMN.UNIT"),"Find known unit mismatch");QTest::mouseClick(jumpFinding,Qt::LeftButton);wait(w);require(tabs->currentIndex()==3,"Metadata finding opens the original header");
+        tabs->setCurrentIndex(5);require(selectRule("HITS.COUNT"),"Find known invalid hit count");QTest::mouseClick(jumpFinding,Qt::LeftButton);wait(w);require(w.selectedRow()==2&&tabs->currentIndex()==0,"Compliance navigates to original invalid row even when omitted from plot");
+        tabs->setCurrentIndex(5);QCoreApplication::processEvents();
+        if(auto path=qEnvironmentVariable("COSI_QT_SCREENSHOT");!path.isEmpty())w.grab().save(QFileInfo(path).dir().filePath("linux-compliance.png"));
         // Destroying a window during a read must not call back into deleted widgets.
         {auto* closing=new cosi::qt::Explorer(false);closing->openFile(argv[1]);delete closing;}
         QThreadPool::globalInstance()->waitForDone();
-        std::cout<<"Linux GUI: columns, time/row axes, filters, original-row paging/jump, point selection, exports and worker lifetime passed\n";
+        std::cout<<"Linux GUI: columns, time/row axes, filters, original-row paging/jump, point selection, exports, compliance findings/navigation and worker lifetime passed\n";
         return 0;
     } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

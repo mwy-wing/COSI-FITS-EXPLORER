@@ -366,6 +366,12 @@ Explorer::Explorer(bool restore) : restore_(restore) {
     connect(table_,&QTableWidget::itemSelectionChanged,this,[this]{if(!updating_)selectRow(table_->currentRow());});
     chart_->selected=[this](long long row){revealRow(row);};
     auto* shortcut=new QShortcut(QKeySequence("Ctrl+Return"),this);connect(shortcut,&QShortcut::activated,this,[this]{applyPlot();});
+    buildCompliance();
+    connect(tabs_,&QTabWidget::currentChanged,this,[this,settingsScroll,back,reset,paging,eventBar]{
+        bool compliance=tabs_->currentWidget()==compliancePage_;
+        chart_->setVisible(!compliance);settingsScroll->setVisible(!compliance);plotLabel_->setVisible(!compliance);back->setVisible(!compliance);reset->setVisible(!compliance);
+        for(auto* controls:{paging,eventBar})for(int i=0;i<controls->count();++i)if(auto* widget=controls->itemAt(i)->widget())widget->setVisible(!compliance);
+    });
     updateControls();
     statusBar()->showMessage("Ready · local files · read only");
     if(restore_) {
@@ -386,8 +392,9 @@ bool Explorer::run(const QString& label,std::function<Result()> work,std::functi
     connect(watcher,&QFutureWatcher<Result>::finished,this,[this,watcher,apply]{
         auto result=watcher->result();watcher->deleteLater();busy_=false;
         centralWidget()->setEnabled(true);for(auto* t:findChildren<QToolBar*>())t->setEnabled(true);
-        if(!result.error.isEmpty()){fail(result.error);return;}
+        if(!result.error.isEmpty()){if(validationRunning_){validationRunning_=false;validationCancel_->hide();validationTimer_->stop();}fail(result.error);return;}
         statusBar()->showMessage("Ready · read only");apply(std::move(result));
+        if(!busy_&&pendingCompliance_)navigateComplianceFinding();
     });
     watcher->setFuture(QtConcurrent::run([work]{Result r;try{return work();}catch(const std::exception& e){r.error=QString::fromUtf8(e.what());}catch(...){r.error="Unknown reader error";}return r;}));
     return true;
@@ -420,7 +427,9 @@ void Explorer::chooseFile() {
 }
 bool Explorer::openFile(const QString& path) {
     return run("Opening "+QFileInfo(path).fileName(),[path]{Result r;r.dataset=openDataset(path.toStdString());return r;},[this](Result r){
-        dataset_=std::move(r.dataset);overlay_=false;selectedRow_=-1;offset_=0;
+        dataset_=std::move(r.dataset);overlay_=false;
+        if(!validationReport_||validationReport_->path!=dataset_->path){validationReport_.reset();complianceTable_->setRowCount(0);complianceDetail_->clear();}
+        validationPath_=q(dataset_->path);if(validationReport_)showCompliance();else complianceLabel_->setText("Ready to validate "+QFileInfo(validationPath_).fileName());selectedRow_=-1;offset_=0;
         fileLabel_->setText(QFileInfo(q(dataset_->path)).fileName());fileLabel_->setToolTip(q(dataset_->path));fileSubtitle_->setText(q(dataset_->path));fileSubtitle_->setToolTip(q(dataset_->path));
         setWindowTitle(QFileInfo(q(dataset_->path)).fileName()+" — COSI Explorer");
         updating_=true;hduBox_->clear();
@@ -595,6 +604,7 @@ bool Explorer::exportPlot(const QString& path) {
     statusBar()->showMessage("Exported "+QFileInfo(path).fileName());return true;
 }
 void Explorer::closeEvent(QCloseEvent* event) {
+    if(validationControl_)validationControl_->cancel=true;
     if(restore_){QSettings settings;settings.setValue("window",saveGeometry());if(dataset_)settings.setValue("file",q(dataset_->path));}
     QMainWindow::closeEvent(event);
 }
@@ -607,3 +617,285 @@ void Explorer::dropEvent(QDropEvent* event) {
     }
 }
 }
+
+namespace cosi::qt {
+void Explorer::buildCompliance() {
+    auto *content = new QWidget;
+    auto *reportScroll = new QScrollArea;
+    reportScroll->setWidgetResizable(true);
+    reportScroll->setWidget(content);
+    compliancePage_ = reportScroll;
+    auto *body = new QVBoxLayout(content);
+    body->setContentsMargins(12, 12, 12, 12);
+    auto *heading = new QLabel("Archive compliance · draft profile subset");
+    heading->setStyleSheet("font-size:16px;font-weight:600;");
+    body->addWidget(heading);
+    auto *note = new QLabel("GeD L1a / L1b / L2 + GTI. Full row scans. Draft conflicts and checks outside "
+                            "this profile remain visible; results are not archive acceptance certificates.");
+    note->setWordWrap(true);
+    note->setStyleSheet("color:#607883;");
+    body->addWidget(note);
+    auto *controls = new QHBoxLayout;
+    complianceProfile_ = new QComboBox;
+    complianceProfile_->setObjectName("complianceProfile");
+    complianceProfile_->addItems({"Auto-detect GeD", "Daily GeD L1a", "Daily GeD L1b", "Daily GeD L2"});
+    controls->addWidget(complianceProfile_);
+    deliveryMode_ = new QCheckBox("Delivery file preflight");
+    deliveryMode_->setToolTip("Adds compression/basic filename checks. A complete sequence/catalog is not "
+                              "checked by a single-file run.");
+    controls->addWidget(deliveryMode_);
+    controls->addStretch();
+    auto *choose = new QPushButton("Choose file…");
+    controls->addWidget(choose);
+    validationRun_ = new QPushButton("Validate file");
+    validationRun_->setObjectName("validateFile");
+    controls->addWidget(validationRun_);
+    body->addLayout(controls);
+    connect(choose, &QPushButton::clicked, this, [this] {
+        auto p = QFileDialog::getOpenFileName(this, "Choose FITS file for validation", {},
+                                              "FITS/data files (*);;All files (*)");
+        if (!p.isEmpty()) {
+            validationPath_ = p;
+            validationReport_.reset();
+            complianceTable_->setRowCount(0);
+            complianceDetail_->clear();
+            complianceLabel_->setText("Ready to validate " + QFileInfo(p).fileName());
+            validationOpen_->setEnabled(false);
+            validationExport_->setEnabled(false);
+        }
+    });
+    connect(validationRun_, &QPushButton::clicked, this, [this] { validateCurrentFile(); });
+    complianceLabel_ = new QLabel("Choose a file or open a dataset to begin.");
+    complianceLabel_->setTextFormat(Qt::PlainText);
+    complianceLabel_->setWordWrap(true);
+    body->addWidget(complianceLabel_);
+    auto *tools = new QHBoxLayout;
+    complianceFilter_ = new QComboBox;
+    complianceFilter_->setObjectName("complianceFilter");
+    complianceFilter_->addItems({"Issues and review", "All checks", "Failures only"});
+    tools->addWidget(complianceFilter_);
+    tools->addStretch();
+    validationOpen_ = new QPushButton("Open source location");
+    validationOpen_->setObjectName("openComplianceFinding");
+    tools->addWidget(validationOpen_);
+    validationExport_ = new QPushButton("Export report…");
+    tools->addWidget(validationExport_);
+    body->addLayout(tools);
+    connect(complianceFilter_, qOverload<int>(&QComboBox::currentIndexChanged), this,
+            [this] { showCompliance(); });
+    connect(validationOpen_, &QPushButton::clicked, this, [this] { openComplianceFinding(); });
+    connect(validationExport_, &QPushButton::clicked, this, [this] { exportCompliance(); });
+    auto *split = new QSplitter(Qt::Vertical);
+    complianceTable_ = new QTableWidget;
+    complianceTable_->setObjectName("complianceTable");
+    complianceTable_->setColumnCount(6);
+    complianceTable_->setHorizontalHeaderLabels(
+        {"Status", "HDU / field", "Rule", "Expected", "Found", "Count"});
+    complianceTable_->verticalHeader()->hide();
+    complianceTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    complianceTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    complianceTable_->setSelectionMode(QAbstractItemView::SingleSelection);
+    complianceTable_->setAlternatingRowColors(true);
+    complianceTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+    complianceTable_->setColumnWidth(0, 120);
+    complianceTable_->setColumnWidth(1, 180);
+    complianceTable_->setColumnWidth(2, 180);
+    complianceTable_->setColumnWidth(3, 240);
+    complianceTable_->setColumnWidth(4, 300);
+    split->addWidget(complianceTable_);
+    complianceDetail_ = textPanel();
+    split->addWidget(complianceDetail_);
+    split->setSizes({300, 170});
+    body->addWidget(split, 1);
+    tabs_->addTab(compliancePage_, "Compliance");
+    connect(complianceTable_, &QTableWidget::itemSelectionChanged, this, [this] {
+        int row = complianceTable_->currentRow();
+        if (!validationReport_ || row < 0)
+            return;
+        auto i = complianceTable_->item(row, 0)->data(Qt::UserRole).toULongLong();
+        if (i >= validationReport_->findings.size())
+            return;
+        const auto &f = validationReport_->findings[i];
+        QString samples;
+        for (auto r : f.sampleRows)
+            samples += QString::number(r) + " ";
+        complianceDetail_->setPlainText(
+            q(checkStatusName(f.status)) + " · " + q(f.rule) + "\nSource: " + q(validationReport_->path) +
+            "\nHDU: " + QString::number(f.hdu + 1) + "  Column/key: " + q(f.column) +
+            "\nExpected: " + q(f.expected) + "\nFound: " + q(f.actual) +
+            "\nOccurrences: " + QString::number(f.occurrences) + "\nSample original rows: " + samples +
+            "\nReference: " + q(f.reference) + "\nSpecification: " + q(validationReport_->sourceRevision) +
+            "\nInput SHA256: " + q(validationReport_->fileSHA256));
+        validationOpen_->setEnabled(f.hdu >= 0);
+    });
+    connect(complianceTable_, &QTableWidget::cellDoubleClicked, this, [this] { openComplianceFinding(); });
+    validationCancel_ = new QPushButton("Cancel validation");
+    validationCancel_->setObjectName("cancelValidation");
+    statusBar()->addPermanentWidget(validationCancel_);
+    validationCancel_->hide();
+    connect(validationCancel_, &QPushButton::clicked, this, [this] {
+        if (validationControl_)
+            validationControl_->cancel = true;
+    });
+    validationTimer_ = new QTimer(this);
+    validationTimer_->setInterval(200);
+    connect(validationTimer_, &QTimer::timeout, this, [this] {
+        if (!validationControl_)
+            return;
+        auto rows = validationControl_->rows.load(), total = validationControl_->totalRows.load();
+        statusBar()->showMessage(
+            validationControl_->phase == 2
+                ? QString("Compliance · %1 / %2 source rows checked").arg(rows).arg(total)
+                : "Compliance · reading file and verifying HDU checksums…");
+    });
+    validationOpen_->setEnabled(false);
+    validationExport_->setEnabled(false);
+}
+void Explorer::validateCurrentFile() {
+    if (busy_)
+        return;
+    if (validationPath_.isEmpty() && dataset_)
+        validationPath_ = q(dataset_->path);
+    if (validationPath_.isEmpty()) {
+        fail("Choose a file for validation first.");
+        return;
+    }
+    ValidationOptions options;
+    options.profile = static_cast<ArchiveProfile>(complianceProfile_->currentIndex());
+    options.delivery = deliveryMode_->isChecked();
+    validationControl_ = std::make_shared<ValidationControl>();
+    options.control = validationControl_;
+    auto path = validationPath_;
+    validationRunning_ = true;
+    validationCancel_->show();
+    validationTimer_->start();
+    tabs_->setCurrentWidget(compliancePage_);
+    complianceLabel_->setText("Validating " + QFileInfo(path).fileName() + " · Cancel is in the status bar.");
+    run(
+        "Validating archive format",
+        [path, options] {
+            Result r;
+            r.validation =
+                std::make_shared<ValidationReport>(validateArchiveFile(path.toStdString(), options));
+            return r;
+        },
+        [this](Result r) {
+            validationReport_ = std::move(r.validation);
+            validationRunning_ = false;
+            validationCancel_->hide();
+            validationTimer_->stop();
+            showCompliance();
+        });
+}
+void Explorer::showCompliance() {
+    if (!validationReport_) {
+        validationOpen_->setEnabled(false);
+        validationExport_->setEnabled(false);
+        return;
+    }
+    const auto &report = *validationReport_;
+    complianceLabel_->setText(QFileInfo(q(report.path)).fileName() + " · " + q(report.profile) + "\n" +
+                              q(report.summary()));
+    complianceTable_->setRowCount(0);
+    complianceDetail_->clear();
+    validationOpen_->setEnabled(false);
+    validationExport_->setEnabled(true);
+    for (size_t i = 0; i < report.findings.size(); ++i) {
+        const auto &f = report.findings[i];
+        if (complianceFilter_->currentIndex() == 0 && f.status == CheckStatus::Pass)
+            continue;
+        if (complianceFilter_->currentIndex() == 2 && f.status != CheckStatus::Fail)
+            continue;
+        int row = complianceTable_->rowCount();
+        complianceTable_->insertRow(row);
+        QString location =
+            f.hdu < 0 ? "File/profile"
+                      : (size_t(f.hdu) < report.hduNames.size() ? q(report.hduNames[size_t(f.hdu)])
+                                                                : "HDU " + QString::number(f.hdu + 1));
+        if (!f.column.empty())
+            location += " / " + q(f.column);
+        if (f.row)
+            location += " · row " + QString::number(f.row);
+        QStringList values = {q(checkStatusName(f.status)),  location, q(f.rule), q(f.expected), q(f.actual),
+                              QString::number(f.occurrences)};
+        for (int c = 0; c < 6; ++c) {
+            auto *cell = new QTableWidgetItem(values[c]);
+            cell->setToolTip(values[c]);
+            if (c == 0) {
+                cell->setData(Qt::UserRole, qulonglong(i));
+                cell->setForeground(f.status == CheckStatus::Fail   ? QColor("#b14438")
+                                    : f.status == CheckStatus::Pass ? QColor("#277c9d")
+                                                                    : QColor("#986517"));
+            }
+            complianceTable_->setItem(row, c, cell);
+        }
+    }
+    if (complianceTable_->rowCount())
+        complianceTable_->selectRow(0);
+}
+void Explorer::openComplianceFinding() {
+    if (busy_ || !validationReport_ || complianceTable_->currentRow() < 0)
+        return;
+    auto i = complianceTable_->item(complianceTable_->currentRow(), 0)->data(Qt::UserRole).toULongLong();
+    if (i >= validationReport_->findings.size())
+        return;
+    const auto &f = validationReport_->findings[i];
+    if (f.hdu < 0)
+        return;
+    pendingCompliance_ = std::make_shared<Finding>(f);
+    if (!dataset_ || dataset_->path != validationReport_->path)
+        openFile(q(validationReport_->path));
+    else
+        navigateComplianceFinding();
+}
+void Explorer::navigateComplianceFinding() {
+    if (busy_ || !pendingCompliance_ || !dataset_)
+        return;
+    auto f = *pendingCompliance_;
+    if (f.hdu < 0 || f.hdu >= int(dataset_->hdus.size())) {
+        pendingCompliance_.reset();
+        return;
+    }
+    if (hdu_ != f.hdu) {
+        QSignalBlocker blocker(hduBox_);
+        hduBox_->setCurrentIndex(f.hdu);
+        selectHDU(f.hdu);
+        if (!busy_)
+            navigateComplianceFinding();
+        return;
+    }
+    pendingCompliance_.reset();
+    if (f.row > 0) {
+        QSignalBlocker blocker(rows_);
+        rows_->setCurrentIndex(0);
+        revealRow(f.row);
+        return;
+    }
+    tabs_->setCurrentWidget(header_);
+    QString key = q(f.keyword.empty() ? f.column : f.keyword);
+    auto pos = header_->toPlainText().indexOf(key);
+    auto cursor = header_->textCursor();
+    cursor.setPosition(std::max<qsizetype>(0, pos));
+    if (pos >= 0)
+        cursor.movePosition(QTextCursor::EndOfLine, QTextCursor::KeepAnchor);
+    header_->setTextCursor(cursor);
+    header_->ensureCursorVisible();
+}
+void Explorer::exportCompliance() {
+    if (busy_ || !validationReport_)
+        return;
+    auto path =
+        QFileDialog::getSaveFileName(this, "Export compliance report", "cosi-compliance.json",
+                                     "JSON report (*.json);;CSV findings (*.csv);;Text report (*.txt)");
+    if (path.isEmpty())
+        return;
+    if (QFileInfo(path).suffix().isEmpty())
+        path += ".json";
+    try {
+        saveValidationReport(*validationReport_, path.toStdString());
+        statusBar()->showMessage("Exported compliance report.");
+    } catch (const std::exception &e) {
+        fail(QString::fromUtf8(e.what()));
+    }
+}
+} // namespace cosi::qt

@@ -1,6 +1,7 @@
 #import <Cocoa/Cocoa.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #include "Data.hpp"
+#include "Validation.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -479,6 +480,18 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     NSImageView *_brandGlyph,*_fileGlyph;
     TraceCards* _traceCards;NSScrollView* _traceCardsScroll;
     BOOL _sidebarHidden,_inspectorHidden,_syncingCatalog,_restoreEnabled,_restoreViewport,_hasAppliedPlot;
+    std::shared_ptr<ValidationReport> _complianceReport;
+    std::shared_ptr<ValidationControl> _complianceControl;
+    std::shared_ptr<Finding> _pendingComplianceFinding;
+    std::vector<size_t> _complianceVisible;
+    NSUInteger _complianceToken;BOOL _validating;
+    NSString* _complianceTarget;NSTimer* _complianceTimer;
+    NSTextField *_complianceTitle,*_complianceNotice,*_complianceLabel;
+    NSPopUpButton *_complianceProfile,*_complianceFilter;
+    NSButton *_complianceChoose,*_complianceRun,*_complianceCancel,*_complianceExport,*_complianceOpen,*_complianceDelivery;
+    NSTableView* _complianceTable;NSScrollView *_complianceScroll,*_complianceDetailScroll;NSTextView* _complianceDetail;
+    NSArray<NSControl*>* _complianceGuarded;NSArray<NSNumber*>* _complianceEnabled;
+    BOOL _complianceTest;
     NSUserDefaults* _preferences;NSDictionary* _pendingWorkspace;double _restoredMin,_restoredMax,_restoredYMin,_restoredYMax;
 }
 - (void)layout;
@@ -492,7 +505,7 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     NSArray* launchArguments=NSProcessInfo.processInfo.arguments;
     _preferences=NSUserDefaults.standardUserDefaults;
     for(NSUInteger i=1;i+1<launchArguments.count;++i)if([launchArguments[i]isEqualToString:@"--preferences-suite"]){_preferencesSuite=launchArguments[i+1];_preferences=[[NSUserDefaults alloc]initWithSuiteName:_preferencesSuite];}
-    _restoreEnabled=![launchArguments containsObject:@"--no-restore"]&&![launchArguments containsObject:@"--smoke-dir"]&&![launchArguments containsObject:@"--column-test-dir"]&&(![launchArguments containsObject:@"--plot-tools-test-dir"]||_preferencesSuite.length);
+    _restoreEnabled=![launchArguments containsObject:@"--no-restore"]&&![launchArguments containsObject:@"--smoke-dir"]&&![launchArguments containsObject:@"--column-test-dir"]&&![launchArguments containsObject:@"--compliance-test-dir"]&&(![launchArguments containsObject:@"--plot-tools-test-dir"]||_preferencesSuite.length);
     _sidebarHidden=_restoreEnabled&&[_preferences boolForKey:@"SidebarHiddenV1"];_inspectorHidden=_restoreEnabled&&[_preferences boolForKey:@"InspectorHiddenV1"];
     for(NSUInteger i=1;i+1<launchArguments.count;++i)if([launchArguments[i]isEqualToString:@"--data-root"])_root=launchArguments[i+1];
     _window=[[NSWindow alloc]initWithContentRect:NSMakeRect(0,0,1480,920) styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskMiniaturizable|NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];
@@ -512,7 +525,7 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     _title=label(@"Your mission data, in view.",19,ink());_title.font=[NSFont systemFontOfSize:19 weight:NSFontWeightSemibold];
     _subtitle=label(@"Choose a file from the catalog, or drop one here.",11,muted());_summary=label(@"FITS  /  L0 PACKETS  /  EVENT GEOMETRY",12,accent());
     _hduChoice=[NSPopUpButton new];_hduChoice.target=self;_hduChoice.action=@selector(changeHDU:);
-    _tabs=[[NSSegmentedControl alloc]initWithFrame:NSZeroRect];[_tabs setSegmentCount:4];for(int i=0;i<4;++i)[_tabs setLabel:@[@"Explore",@"Header",@"Hit geometry",@"Trace event"][i] forSegment:i];_tabs.selectedSegment=0;_tabs.target=self;_tabs.action=@selector(changeTab:);
+    _tabs=[[NSSegmentedControl alloc]initWithFrame:NSZeroRect];[_tabs setSegmentCount:5];for(int i=0;i<5;++i)[_tabs setLabel:@[@"Explore",@"Header",@"Hit geometry",@"Trace event",@"Compliance"][i] forSegment:i];_tabs.selectedSegment=0;_tabs.target=self;_tabs.action=@selector(changeTab:);
     _mode=[self popup:@[@"Histogram",@"Event counts vs time",@"Column comparison",@"Column values"] action:@selector(modeChanged:)];_x=[self popup:@[] action:@selector(updatePlot:)];_y=[self popup:@[] action:@selector(updatePlot:)];_reduce=[self popup:@[@"All elements",@"First element",@"Sum row / hits"] action:@selector(updatePlot:)];
     _seriesAxis=[self popup:@[@"Time",@"Row number (1, 2, 3…)"] action:@selector(updatePlot:)];
     _seriesAxis.toolTip=@"Time uses the stored time column. Row number is the original 1-based table row, preserved after filters.";
@@ -553,6 +566,7 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     for(NSUInteger i=1;i+1<args.count;++i)if([args[i]isEqualToString:@"--smoke-dir"])_smokeDir=args[i+1];
     for(NSUInteger i=1;i+1<args.count;++i)if([args[i]isEqualToString:@"--column-test-dir"]){_smokeDir=args[i+1];_columnTest=YES;}
     for(NSUInteger i=1;i+1<args.count;++i)if([args[i]isEqualToString:@"--plot-tools-test-dir"]){_smokeDir=args[i+1];_plotToolsTest=YES;_restoredToolsRun=[args containsObject:@"--check-restored-workspace"];}
+    for(NSUInteger i=1;i+1<args.count;++i)if([args[i]isEqualToString:@"--compliance-test-dir"]){_smokeDir=args[i+1];_complianceTest=YES;}
     if(!startup&&_smokeDir&&!_plotToolsTest){NSString* sample=[_root stringByAppendingPathComponent:@"26/10/06/v1/L2/cs20260630ged_00_l2.fits"];if([[NSFileManager defaultManager]fileExistsAtPath:sample])startup=sample;}
     if(!startup&&_restoreEnabled){
         id stored=[_preferences objectForKey:@"WorkspaceV1"];
@@ -607,6 +621,7 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     _traceCards=[TraceCards new];_traceCards.selected=-1;_traceCardsScroll=scroll(_traceCards);_traceCardsScroll.hasHorizontalScroller=NO;_traceCardsScroll.drawsBackground=NO;[_surface addSubview:_traceCardsScroll];
     __weak Explorer* weak=self;_traceCards.onSelect=^(NSInteger index){[weak selectTraceCard:index];};
     _traceDetailsHeading=label(@"Event record & provenance",14,ink());_traceDetailsHeading.font=[NSFont systemFontOfSize:14 weight:NSFontWeightSemibold];[_surface addSubview:_traceDetailsHeading];
+    [self buildComplianceWorkspace];
     NSToolbar* toolbar=[[NSToolbar alloc]initWithIdentifier:@"COSIWorkspaceToolbar"];toolbar.delegate=self;toolbar.displayMode=NSToolbarDisplayModeIconOnly;toolbar.allowsUserCustomization=NO;_window.toolbar=toolbar;
 }
 - (NSArray<NSToolbarItemIdentifier>*)toolbarDefaultItemIdentifiers:(NSToolbar*)toolbar {return @[@"sidebar",@"open",NSToolbarFlexibleSpaceItemIdentifier,@"compare",@"export",@"inspector"];}
@@ -619,6 +634,283 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
 }
 - (void)toggleSidebar:(id)sender {_sidebarHidden=!_sidebarHidden;[self layout];[self saveWindowLayout];}
 - (void)toggleInspector:(id)sender {_inspectorHidden=!_inspectorHidden;[self inspectorChanged:nil];[self layout];[self saveWindowLayout];}
+- (void)buildComplianceWorkspace {
+    _complianceTitle = label(@"Archive compliance", 18, ink());
+    _complianceNotice =
+        label(@"GeD L1a / L1b / L2 + GTI · Full source-row scan · Archive ICD v1.1 draft", 10, muted());
+    _complianceLabel = label(@"Choose a file or validate the open dataset.", 11, ink());
+    _complianceLabel.maximumNumberOfLines = 2;
+    _complianceLabel.lineBreakMode = NSLineBreakByWordWrapping;
+    _complianceProfile =
+        [self popup:@[ @"Auto-detect GeD", @"Daily GeD L1a", @"Daily GeD L1b", @"Daily GeD L2" ] action:nil];
+    _complianceFilter = [self popup:@[ @"Issues and review", @"All checks", @"Failures only" ]
+                             action:@selector(reloadCompliance:)];
+    _complianceChoose = button(@"Choose file…", self, @selector(chooseComplianceFile:));
+    _complianceRun = button(@"Validate file", self, @selector(runCompliance:));
+    _complianceCancel = button(@"Cancel", self, @selector(cancelCompliance:));
+    _complianceExport = button(@"Export report…", self, @selector(exportCompliance:));
+    _complianceOpen = button(@"Open source location", self, @selector(openComplianceFinding:));
+    _complianceDelivery = [NSButton checkboxWithTitle:@"Delivery file preflight" target:nil action:nil];
+    _complianceDelivery.font = [NSFont systemFontOfSize:11];
+    _complianceTable = [self tableWithIdentifier:@"compliance"];
+    _complianceTable.rowHeight = 30;
+    _complianceTable.style = NSTableViewStyleFullWidth;
+    _complianceTable.usesAlternatingRowBackgroundColors = YES;
+    _complianceTable.target = self;
+    _complianceTable.doubleAction = @selector(openComplianceFinding:);
+    NSArray *titles = @[ @"Status", @"HDU / field", @"Rule", @"Expected", @"Found", @"Count" ];
+    CGFloat widths[] = {120, 180, 200, 240, 290, 70};
+    for (int i = 0; i < 6; ++i) {
+        NSTableColumn *column =
+            [[NSTableColumn alloc] initWithIdentifier:[NSString stringWithFormat:@"%d", i]];
+        column.title = titles[i];
+        column.width = widths[i];
+        [_complianceTable addTableColumn:column];
+    }
+    _complianceScroll = scroll(_complianceTable);
+    _complianceDetail = reader();
+    _complianceDetailScroll = scroll(_complianceDetail);
+    _complianceDetailScroll.hasHorizontalScroller = NO;
+    card(_complianceScroll);
+    card(_complianceDetailScroll);
+    for (NSView *view in @[
+             _complianceTitle, _complianceNotice, _complianceLabel, _complianceProfile, _complianceFilter,
+             _complianceChoose, _complianceRun, _complianceCancel, _complianceExport, _complianceOpen,
+             _complianceDelivery, _complianceScroll, _complianceDetailScroll
+         ]) {
+        view.hidden = YES;
+        [_surface addSubview:view];
+    }
+    _complianceExport.enabled = NO;
+    _complianceOpen.enabled = NO;
+}
+- (void)chooseComplianceFile:(id)sender {
+    NSOpenPanel *panel = NSOpenPanel.openPanel;
+    panel.message = @"Choose a local FITS file for read-only validation. A file that cannot be opened by the "
+                    @"viewer can still receive a diagnostic report.";
+    [panel beginSheetModalForWindow:_window
+                  completionHandler:^(NSModalResponse response) {
+                    if (response == NSModalResponseOK) {
+                        self->_complianceTarget = panel.URL.path;
+                        self->_complianceReport.reset();
+                        self->_complianceVisible.clear();
+                        [self->_complianceTable reloadData];
+                        self->_complianceDetail.string = @"";
+                        self->_complianceExport.enabled = NO;
+                        self->_complianceOpen.enabled = NO;
+                        self->_complianceLabel.stringValue =
+                            [@"Ready to validate " stringByAppendingString:panel.URL.lastPathComponent];
+                    }
+                  }];
+}
+- (void)finishComplianceControls {
+    [_complianceTimer invalidate];
+    _complianceTimer = nil;
+    for (NSUInteger i = 0; i < _complianceGuarded.count; ++i)
+        _complianceGuarded[i].enabled = _complianceEnabled[i].boolValue;
+    _complianceGuarded = nil;
+    _complianceEnabled = nil;
+    _validating = NO;
+    _complianceCancel.hidden = YES;
+}
+- (void)runCompliance:(id)sender {
+    if (_busy || _validating)
+        return;
+    if (!_complianceTarget.length && _data)
+        _complianceTarget = S(_data->path);
+    if (!_complianceTarget.length) {
+        [self showError:@"Choose a file to validate first."];
+        return;
+    }
+    ValidationOptions options;
+    options.profile = (ArchiveProfile)_complianceProfile.indexOfSelectedItem;
+    options.delivery = _complianceDelivery.state == NSControlStateValueOn;
+    _complianceControl = std::make_shared<ValidationControl>();
+    options.control = _complianceControl;
+    std::string path = _complianceTarget.UTF8String;
+    NSUInteger token = ++_complianceToken;
+    _validating = YES;
+    _tabs.selectedSegment = 4;
+    [self changeTab:nil];
+    _complianceLabel.stringValue =
+        [@"Validating " stringByAppendingString:_complianceTarget.lastPathComponent];
+    _complianceGuarded = @[
+        _hduChoice,
+        _mode,
+        _x,
+        _y,
+        _seriesAxis,
+        _reduce,
+        _bins,
+        _min,
+        _max,
+        _tmin,
+        _tmax,
+        _class,
+        _clean,
+        _normalize,
+        _complianceProfile,
+        _complianceFilter,
+        _complianceChoose,
+        _complianceRun,
+        _complianceExport,
+        _complianceOpen,
+        _complianceDelivery
+    ];
+    NSMutableArray *states = [NSMutableArray array];
+    for (NSControl *control in _complianceGuarded) {
+        [states addObject:@(control.enabled)];
+        control.enabled = NO;
+    }
+    _complianceEnabled = states;
+    _complianceCancel.enabled = YES;
+    [self setBusy:YES message:@"Reading file and verifying HDU checksums…"];
+    __weak Explorer *weak = self;
+    _complianceTimer = [NSTimer
+        scheduledTimerWithTimeInterval:.2
+                               repeats:YES
+                                 block:^(NSTimer *timer) {
+                                   Explorer *strong = weak;
+                                   if (!strong || !strong->_validating)
+                                       return;
+                                   auto control = strong->_complianceControl;
+                                   if (control->phase == 2)
+                                       strong->_status.stringValue = [NSString
+                                           stringWithFormat:@"Compliance · %@ / %@ source rows checked",
+                                                            countString(control->rows),
+                                                            countString(control->totalRows)];
+                                 }];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+      auto report = std::make_shared<ValidationReport>(validateArchiveFile(path, options));
+      dispatch_async(dispatch_get_main_queue(), ^{
+        if (token != self->_complianceToken)
+            return;
+        [self finishComplianceControls];
+        self->_complianceReport = report;
+        [self reloadCompliance:nil];
+        [self setBusy:NO message:S(report->summary())];
+      });
+    });
+}
+- (void)cancelCompliance:(id)sender {
+    if (_complianceControl) {
+        _complianceControl->cancel = true;
+        _complianceCancel.enabled = NO;
+        _complianceLabel.stringValue = @"Cancellation requested; waiting for the current CFITSIO operation.";
+    }
+}
+- (void)reloadCompliance:(id)sender {
+    _complianceVisible.clear();
+    _complianceDetail.string = @"";
+    if (!_complianceReport) {
+        [_complianceTable reloadData];
+        return;
+    }
+    const auto &report = *_complianceReport;
+    for (size_t i = 0; i < report.findings.size(); ++i) {
+        const auto &f = report.findings[i];
+        if (_complianceFilter.indexOfSelectedItem == 0 && f.status == CheckStatus::Pass)
+            continue;
+        if (_complianceFilter.indexOfSelectedItem == 2 && f.status != CheckStatus::Fail)
+            continue;
+        _complianceVisible.push_back(i);
+    }
+    _complianceLabel.stringValue =
+        [NSString stringWithFormat:@"%@ · %@\n%@", S(std::filesystem::path(report.path).filename().string()),
+                                   S(report.profile), S(report.summary())];
+    _complianceLabel.toolTip = S(validationText(report));
+    _complianceExport.enabled = YES;
+    _complianceOpen.enabled = NO;
+    [_complianceTable reloadData];
+    if (!_complianceVisible.empty())
+        [_complianceTable selectRowIndexes:[NSIndexSet indexSetWithIndex:0] byExtendingSelection:NO];
+}
+- (void)complianceSelection:(id)sender {
+    NSInteger row = _complianceTable.selectedRow;
+    if (!_complianceReport || row < 0 || row >= (NSInteger)_complianceVisible.size())
+        return;
+    const auto &f = _complianceReport->findings[_complianceVisible[row]];
+    std::ostringstream text;
+    text << checkStatusName(f.status) << " · " << f.rule << "\nSource: " << _complianceReport->path
+         << "\nHDU: " << f.hdu + 1 << "  Field/key: " << f.column << "\nExpected: " << f.expected
+         << "\nFound: " << f.actual << "\nOccurrences: " << f.occurrences << "\nSample original rows: ";
+    for (auto r : f.sampleRows)
+        text << r << ' ';
+    text << "\nReference: " << f.reference << "\nSpecification: " << _complianceReport->sourceRevision
+         << "\nInput SHA256: " << _complianceReport->fileSHA256;
+    _complianceDetail.string = S(text.str());
+    _complianceOpen.enabled = f.hdu >= 0 && !_validating;
+}
+- (void)openComplianceFinding:(id)sender {
+    NSInteger row = _complianceTable.selectedRow;
+    if (_validating || !_complianceReport || row < 0 || row >= (NSInteger)_complianceVisible.size())
+        return;
+    const auto &f = _complianceReport->findings[_complianceVisible[row]];
+    if (f.hdu < 0)
+        return;
+    if (!_data || _data->path != _complianceReport->path) {
+        _pendingComplianceFinding = std::make_shared<Finding>(f);
+        [self openPath:S(_complianceReport->path)];
+    } else
+        [self navigateCompliance:f];
+}
+- (void)navigateCompliance:(const Finding &)finding {
+    if (!_data || finding.hdu < 0 || finding.hdu >= (int)_data->hdus.size())
+        return;
+    BOOL change = _hdu != finding.hdu || !_header.string.length;
+    [_hduChoice selectItemAtIndex:finding.hdu];
+    if (change) {
+        if (finding.row > 0) {
+            _pendingOpenPath = S(_data->path);
+            _pendingOpenRow = finding.row - 1;
+        }
+        _tabs.selectedSegment = 0;
+        [self changeHDU:nil];
+    }
+    if (finding.row > 0) {
+        _tabs.selectedSegment = 0;
+        [self changeTab:nil];
+        _tableMode.selectedSegment = 0;
+        if (!change)
+            [self loadPage:((finding.row - 1) / 250) * 250 selectingRow:finding.row - 1];
+        _inspectorMode.selectedSegment = 1;
+        [self inspectorChanged:nil];
+    } else {
+        _tabs.selectedSegment = 1;
+        [self changeTab:nil];
+        NSString *keyword = S(finding.keyword.empty() ? finding.column : finding.keyword);
+        NSRange range = keyword.length ? [_header.string rangeOfString:keyword] : NSMakeRange(NSNotFound, 0);
+        if (range.location != NSNotFound) {
+            [_header setSelectedRange:range];
+            [_header scrollRangeToVisible:range];
+        }
+    }
+}
+- (BOOL)saveComplianceTo:(NSString *)path {
+    if (!_complianceReport)
+        return NO;
+    try {
+        saveValidationReport(*_complianceReport, path.UTF8String);
+        _status.stringValue = @"Exported compliance report.";
+        return YES;
+    } catch (const std::exception &e) {
+        [self showError:S(e.what())];
+        return NO;
+    }
+}
+- (void)exportCompliance:(id)sender {
+    if (_validating || !_complianceReport)
+        return;
+    NSSavePanel *panel = NSSavePanel.savePanel;
+    panel.nameFieldStringValue = @"cosi-compliance.json";
+    panel.allowedContentTypes = @[ UTTypeJSON, UTTypeCommaSeparatedText, UTTypePlainText ];
+    [panel beginSheetModalForWindow:_window
+                  completionHandler:^(NSModalResponse response) {
+                    if (response == NSModalResponseOK)
+                        [self saveComplianceTo:panel.URL.path];
+                  }];
+}
+
 - (void)buildMenu {
     NSMenu* menu=[NSMenu new];NSMenuItem* app=[NSMenuItem new];[menu addItem:app];NSMenu* appMenu=[NSMenu new];app.submenu=appMenu;
     [appMenu addItemWithTitle:@"About COSI Explorer" action:@selector(orderFrontStandardAboutPanel:) keyEquivalent:@""];
@@ -667,7 +959,7 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     _catalogStatus.frame=NSMakeRect(18,H-78,L-36,18);_openButton.frame=NSMakeRect(13,H-47,L-26,32);
     _fileGlyph.frame=NSMakeRect(x,20,39,43);_title.frame=NSMakeRect(x+52,19,w-160,27);_accessBadge.frame=NSMakeRect(x+w-85,25,85,22);_subtitle.frame=NSMakeRect(x+53,51,w-55,18);_summary.hidden=YES;
     _metrics.frame=NSMakeRect(x,80,w,64);_metrics.needsDisplay=YES;
-    _tabs.frame=NSMakeRect(x-2,160,std::min(454.,w-257),29);_hduChoice.frame=NSMakeRect(x+w-243,159,246,30);
+    _tabs.frame=NSMakeRect(x-2,160,std::min(570.,w-257),29);_hduChoice.frame=NSMakeRect(x+w-243,159,246,30);
     CGFloat chartH=std::clamp((H-200)*.47,270.,360.);
     _plotInteraction.frame=NSMakeRect(x-2,top,210,26);_zoomBack.frame=NSMakeRect(x+216,top-2,78,30);_zoomReset.frame=NSMakeRect(x+298,top-2,70,30);
     BOOL tools=explore&&_canvas.contentMode==0;for(NSView* v in @[_plotInteraction,_zoomBack,_zoomReset])v.hidden=!tools;
@@ -713,6 +1005,11 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     _traceCardsScroll.frame=NSMakeRect(x,top+44,w,222);int cols=w>=760?4:2;CGFloat cardsH=std::max(208.,std::ceil(_traceCards->result.stages.size()/double(cols))*220.);_traceCards.frame=NSMakeRect(0,0,w,cardsH);
     _traceDetailsHeading.frame=NSMakeRect(x,top+287,235,24);_traceStage.frame=NSMakeRect(x+244,top+283,std::max(150.,w-398),29);_openStage.frame=NSMakeRect(x+w-147,top+283,150,29);
     _traceScroll.frame=NSMakeRect(x,top+327,w,std::max(100.,H-top-369));_traceView.frame=NSMakeRect(0,0,w,std::max(H-top-369,_traceView.frame.size.height));_traceView.textContainer.containerSize=NSMakeSize(w-32,CGFLOAT_MAX);
+    _complianceTitle.frame=NSMakeRect(x,top,w-410,26);_complianceChoose.frame=NSMakeRect(x+w-270,top-4,126,31);_complianceRun.frame=NSMakeRect(x+w-140,top-4,143,31);_complianceCancel.frame=NSMakeRect(x+w-400,top-4,126,31);
+    _complianceProfile.frame=NSMakeRect(x-2,top+34,200,29);_complianceDelivery.frame=NSMakeRect(x+210,top+35,210,25);_complianceFilter.frame=NSMakeRect(x+425,top+34,178,29);_complianceExport.frame=NSMakeRect(x+w-139,top+33,142,31);
+    _complianceLabel.frame=NSMakeRect(x,top+73,w-190,44);_complianceOpen.frame=NSMakeRect(x+w-182,top+76,185,31);_complianceNotice.frame=NSMakeRect(x,top+119,w,18);
+    CGFloat complianceY=top+146,complianceH=std::max(170.,H-complianceY-38),complianceTableH=complianceH*.61;
+    _complianceScroll.frame=NSMakeRect(x,complianceY,w,complianceTableH);_complianceTable.frame=NSMakeRect(0,0,std::max(w,1100.),std::max(complianceTableH,CGFloat(_complianceVisible.size())*32));_complianceDetailScroll.frame=NSMakeRect(x,complianceY+complianceTableH+10,w,complianceH-complianceTableH-10);_complianceDetail.frame=NSMakeRect(0,0,w,std::max(200.,complianceH-complianceTableH-10));_complianceDetail.textContainer.containerSize=NSMakeSize(w-32,CGFLOAT_MAX);
     _status.frame=NSMakeRect(x,H-21,w-29,17);_status.font=[NSFont systemFontOfSize:9];_spinner.frame=NSMakeRect(x+w-18,H-22,14,14);
 }
 - (void)inspectorChanged:(id)sender {
@@ -760,6 +1057,9 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
 - (void)chooseFile:(id)sender {NSOpenPanel* p=[NSOpenPanel openPanel];if(_root.length)p.directoryURL=[NSURL fileURLWithPath:_root];[p beginSheetModalForWindow:_window completionHandler:^(NSModalResponse r){if(r==NSModalResponseOK)[self openPath:p.URL.path];}];}
 - (void)openSelectedFile:(id)sender {NSInteger row=_fileTable.selectedRow;if(row>=0&&row<(NSInteger)_visible.size())[self openPath:S(_files[_visible[row]].path)];}
 - (void)openPath:(NSString*)path {
+    if(_validating){_complianceControl->cancel=true;++_complianceToken;[self finishComplianceControls];}
+    _complianceTarget=path;if(_complianceReport&&_complianceReport->path!=std::string(path.UTF8String)){_complianceReport.reset();_complianceVisible.clear();[_complianceTable reloadData];_complianceDetail.string=@"";_complianceLabel.stringValue=@"Ready to validate this file.";_complianceExport.enabled=NO;_complianceOpen.enabled=NO;}
+
     if(_pendingWorkspace&&![_pendingWorkspace[@"path"]isEqualToString:path])_pendingWorkspace=nil;
     BOOL dir=NO;if([[NSFileManager defaultManager]fileExistsAtPath:path isDirectory:&dir]&&dir){_root=path;_rootLabel.stringValue=path;[self scanRoot];return;}
     NSUInteger token=++_openToken;++_plotToken;++_pageToken;++_traceToken;++_overlayLoadToken;_data.reset();_hasAppliedPlot=NO;_columnSummary.available=NO;_columnSummary.needsDisplay=YES;_plottedRows.reset();_pageIndex.reset();_pageLoading=NO;_page=Page{};_selectedRow=-1;_traceL0Path=nil;
@@ -777,7 +1077,7 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
             for(size_t i=0;i<data->hdus.size();++i){const auto& h=data->hdus[i];NSString* title=[NSString stringWithFormat:@"%zu · %@%@",i+1,S(h.name),h.columns.empty()?@"":[NSString stringWithFormat:@" · %lld rows",h.rows]];[self->_hduChoice addItemWithTitle:title];if(!h.columns.empty()&&self->_hdu==0)self->_hdu=int(i);}
             if(self->_pendingWorkspace){NSInteger hi=[self->_pendingWorkspace[@"hdu"]integerValue];
                 if(hi>=0&&hi<(NSInteger)data->hdus.size()&&[self->_pendingWorkspace[@"hduName"]isEqualToString:S(data->hdus[hi].name)])self->_hdu=int(hi);else self->_pendingWorkspace=nil;}
-            [self->_hduChoice selectItemAtIndex:self->_hdu];self->_tabs.selectedSegment=0;[self changeHDU:nil];[self syncCatalogSelection];
+            [self->_hduChoice selectItemAtIndex:self->_hdu];self->_tabs.selectedSegment=0;if(self->_pendingComplianceFinding){auto finding=*self->_pendingComplianceFinding;self->_pendingComplianceFinding.reset();[self navigateCompliance:finding];}else [self changeHDU:nil];[self syncCatalogSelection];
         });
     });
 }
@@ -824,12 +1124,14 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     if(sender){if(_mode.indexOfSelectedItem!=0&&_overlayData)[self clearOverlay:nil];else [self updatePlot:sender];}
 }
 - (void)changeTab:(id)sender {
-    NSInteger tab=_tabs.selectedSegment;BOOL explore=tab==0,header=tab==1,geom=tab==2,trace=tab==3;
+    NSInteger tab=_tabs.selectedSegment;BOOL explore=tab==0,header=tab==1,geom=tab==2,trace=tab==3,compliance=tab==4;
     for(NSView* v in @[_mode,_x,_y,_seriesAxis,_reduce,_bins,_log,_filterLabel,_min,_max,_tmin,_tmax,_class,_clean,_plotButton,_plotNote,_eventScroll,_detailLabel,_detailScroll,_previous,_next,_pageLabel,_jump,_go,_export])v.hidden=!explore;
     for(NSView* v in @[_overlayButton,_overlayHDU,_normalize,_clearOverlay,_overlayLabel])v.hidden=!explore;
     for(NSView* v in @[_traceScroll,_traceButton,_chooseL0,_traceStage,_openStage,_traceLabel])v.hidden=!trace;
     _traceCardsScroll.hidden=!trace;_traceDetailsHeading.hidden=!trace;_eventTitle.hidden=!explore;_eventCaption.hidden=!explore;_tableMode.hidden=!explore;
-    _headerScroll.hidden=!header;_canvas.hidden=header||trace;_canvas.contentMode=geom?2:(_data&&!_data->hdus[_hdu].axes.empty()?1:0);
+    for(NSView* v in @[_complianceTitle,_complianceNotice,_complianceLabel,_complianceProfile,_complianceFilter,_complianceChoose,_complianceRun,_complianceExport,_complianceOpen,_complianceDelivery,_complianceScroll,_complianceDetailScroll])v.hidden=!compliance;
+    _complianceCancel.hidden=!compliance||!_validating;_hduChoice.hidden=compliance;
+    _headerScroll.hidden=!header;_canvas.hidden=header||trace||compliance;_canvas.contentMode=geom?2:(_data&&!_data->hdus[_hdu].axes.empty()?1:0);
     [self modeChanged:nil];[self layout];_canvas.needsDisplay=YES;
     [self inspectorChanged:nil];
     if(trace)[self refreshTrace:nil];
@@ -996,8 +1298,12 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
         [self loadPage:position selectingRow:(long long)row-1];
     }catch(const std::exception& e){[self showError:S(e.what())];}
 }
-- (NSInteger)numberOfRowsInTableView:(NSTableView*)t {return t==_fileTable?_visible.size():_page.rows.size();}
+- (NSInteger)numberOfRowsInTableView:(NSTableView*)t {return t==_complianceTable?_complianceVisible.size():t==_fileTable?_visible.size():_page.rows.size();}
 - (NSView*)tableView:(NSTableView*)t viewForTableColumn:(NSTableColumn*)c row:(NSInteger)row {
+    if(t==_complianceTable){if(!_complianceReport||row<0||row>=(NSInteger)_complianceVisible.size())return nil;const auto& f=_complianceReport->findings[_complianceVisible[row]];
+        NSString* value;NSInteger col=c.identifier.integerValue;
+        if(col==0)value=S(checkStatusName(f.status));else if(col==1)value=f.hdu<0?@"File/profile":[NSString stringWithFormat:@"HDU %d · %@%@",f.hdu+1,S(f.column),f.row?[NSString stringWithFormat:@" · row %lld",f.row]:@""];else if(col==2)value=S(f.rule);else if(col==3)value=S(f.expected);else if(col==4)value=S(f.actual);else value=countString(f.occurrences);
+        NSTextField* cell=label(value,11,col==0?(f.status==CheckStatus::Fail?RGB(177,68,56):f.status==CheckStatus::Pass?accent():RGB(152,101,23)):ink());cell.toolTip=value;return cell;}
     if(t==_fileTable){if(row<0||row>=(NSInteger)_visible.size())return nil;const auto& f=_files[_visible[row]];
         CatalogCell* cell=[t makeViewWithIdentifier:@"CatalogCell" owner:self];if(!cell){cell=[[CatalogCell alloc]initWithFrame:NSMakeRect(0,0,245,62)];cell.identifier=@"CatalogCell";}
         auto name=std::filesystem::path(f.path).filename().string();auto parent=std::filesystem::path(f.relative).parent_path().string();NSString* level=S(std::filesystem::path(parent).filename().string()).uppercaseString;
@@ -1008,9 +1314,9 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
     NSTextField* l=label(value,12,ink());l.font=[NSFont monospacedSystemFontOfSize:12 weight:NSFontWeightRegular];l.toolTip=value;l.lineBreakMode=NSLineBreakByTruncatingTail;return l;
 }
 - (void)tableViewSelectionDidChange:(NSNotification*)note {
-    NSTableView* t=note.object;if(t==_fileTable){if(!_syncingCatalog)[self openSelectedFile:nil];return;}if(t!=_eventTable||!_data||t.selectedRow<0||t.selectedRow>=(NSInteger)_page.sourceRows.size())return;
+    NSTableView* t=note.object;if(t==_complianceTable){[self complianceSelection:nil];return;}if(t==_fileTable){if(!_syncingCatalog)[self openSelectedFile:nil];return;}if(t!=_eventTable||!_data||t.selectedRow<0||t.selectedRow>=(NSInteger)_page.sourceRows.size())return;
     long long row=_page.sourceRows[t.selectedRow]-1;_selectedRow=row;_canvas.selectedSourceRow=row+1;_canvas->_hoverLayer.needsDisplay=YES;++_traceToken;auto data=_data;int hi=_hdu;_detailLabel.stringValue=[NSString stringWithFormat:@"ROW %lld · ALL FIELDS",row+1];
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{std::string details;Geometry g;try{details=rowDetail(*data,hi,row);g=readGeometry(*data,hi,row);}catch(const std::exception& e){details=e.what();}
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{std::string details;Geometry g;try{details=rowDetail(*data,hi,row);}catch(const std::exception& e){details=e.what();}try{g=readGeometry(*data,hi,row);}catch(const std::exception& e){details+="\n\nGeometry unavailable: "+std::string(e.what());}
         NSString* content=S(details);dispatch_async(dispatch_get_main_queue(),^{if(data!=self->_data||hi!=self->_hdu||row!=self->_selectedRow)return;self->_detail.string=content;self->_canvas->geometry=std::move(g);self->_canvas.needsDisplay=YES;});
     });
     if(_tabs.selectedSegment==3)[self refreshTrace:nil];
@@ -1332,10 +1638,79 @@ struct FileEntry {std::string path,relative;uint64_t size;bool fits;};
         [@"PASS: applied column summaries, independent median/range, copied precision/units/filters, empty statistics, normalized overlays and event-count gate summaries; filtered row paging/jumps, source identities, rapid table-mode changes, empty-result recovery, aggregate/overlay source-A rows, and table-mode restoration; native click selects original rows across table pages and rapid requests; rectangle zoom on both axes, reverse/Shift/clamped/tiny/cancel gestures, Pan, Back/Reset, log zoom, compact controls; native hover target/action shows full-precision plotted values and original row/time provenance; filtered row provenance; bin hover with overlays; PNG/PDF snapshots of time/row/log-overlay/normalized-overlay plots; viewer note separation; saved applied workspace and X/Y viewport.\n" writeToFile:[_smokeDir stringByAppendingPathComponent:@"ui-result.txt"] atomically:YES encoding:NSUTF8StringEncoding error:nil];[NSApp terminate:nil];return;
     }
 }
+- (void)complianceTestTick {
+    if (_smokeStep == 0) {
+        [self runCompliance:nil];
+        _smokeStep = 1;
+        return;
+    }
+    if (_smokeStep == 1) {
+        if (!_complianceReport || !_complianceReport->scanComplete || !_complianceReport->applicable ||
+            !_complianceReport->count(CheckStatus::Fail) || !_complianceReport->count(CheckStatus::Review))
+            throw std::runtime_error(
+                "Native compliance report must include complete coverage, known failures and draft review");
+        [self savePreview:@"compliance-findings.png"];
+        if (![self saveComplianceTo:[_smokeDir stringByAppendingPathComponent:@"compliance.json"]])
+            throw std::runtime_error("Native JSON report export");
+        for (size_t i = 0; i < _complianceVisible.size(); ++i) {
+            const auto &f = _complianceReport->findings[_complianceVisible[i]];
+            if (f.rule == "COLUMN.UNIT" && f.column == "ENERGY" && f.status == CheckStatus::Fail) {
+                [_complianceTable selectRowIndexes:[NSIndexSet indexSetWithIndex:i] byExtendingSelection:NO];
+                [self openComplianceFinding:nil];
+                _smokeStep = 2;
+                return;
+            }
+        }
+        throw std::runtime_error("Known unit mismatch missing from native findings");
+    }
+    if (_smokeStep == 2) {
+        if (_tabs.selectedSegment != 1 || _hdu != 1 || !_header.selectedRange.length)
+            throw std::runtime_error("Metadata finding must navigate to the source header");
+        _tabs.selectedSegment = 4;
+        [self changeTab:nil];
+        for (size_t i = 0; i < _complianceVisible.size(); ++i) {
+            const auto &f = _complianceReport->findings[_complianceVisible[i]];
+            if (f.rule == "HITS.COUNT" && f.row == 2) {
+                [_complianceTable selectRowIndexes:[NSIndexSet indexSetWithIndex:i] byExtendingSelection:NO];
+                [self openComplianceFinding:nil];
+                _smokeStep = 3;
+                return;
+            }
+        }
+        throw std::runtime_error("Known original-row finding missing from native report");
+    }
+    if (_smokeStep == 3) {
+        if (![_detail.string hasPrefix:S(rowDetail(*_data, _hdu, 1))])
+            return;
+        if (_selectedRow != 1 || _page.sourceRows[_eventTable.selectedRow] != 2 || _tabs.selectedSegment != 0)
+            throw std::runtime_error(
+                "Finding navigation must reveal original source row 2, including an unplotted invalid row");
+        _tabs.selectedSegment = 4;
+        [self changeTab:nil];
+        [_complianceFilter selectItemAtIndex:0];
+        _smokeStep = 4;
+        return;
+    }
+    if (_smokeStep == 4) {
+        NSRange visible = [_complianceTable rowsInRect:_complianceTable.visibleRect];
+        if (!visible.length || ![_complianceTable viewAtColumn:0 row:0 makeIfNecessary:YES])
+            throw std::runtime_error("Compliance table must display finding cells");
+        [self savePreview:@"compliance-findings.png"];
+        [@"PASS: native compliance execution, honest draft/full-scan status, JSON export, header navigation, "
+         @"and original-row finding navigation.\n"
+            writeToFile:[_smokeDir stringByAppendingPathComponent:@"ui-result.txt"]
+             atomically:YES
+               encoding:NSUTF8StringEncoding
+                  error:nil];
+        [NSApp terminate:nil];
+    }
+}
+
 - (void)smokeTick {
     if(++_smokeTicks>300){[@"FAIL: asynchronous UI check timed out" writeToFile:[_smokeDir stringByAppendingPathComponent:@"ui-result.txt"] atomically:YES encoding:NSUTF8StringEncoding error:nil];[NSApp terminate:nil];return;}
     BOOL ready=_data&&!_busy&&!_files.empty()&&!_page.rows.empty()&&!_canvas->plot.x.empty()&&_detail.string.length&&[_detail.string rangeOfString:@"Select a row"].location==NSNotFound;
     try {
+        if(_complianceTest){if(_data&&!_busy&&!_pageLoading&&_hasAppliedPlot)[self complianceTestTick];if(!NSApp.running)return;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,200*NSEC_PER_MSEC),dispatch_get_main_queue(),^{[self smokeTick];});return;}
         if(_plotToolsTest){if(_data&&!_busy&&!_pageLoading&&_hasAppliedPlot)[self plotToolsTestTick];if(!NSApp.running)return;dispatch_after(dispatch_time(DISPATCH_TIME_NOW,200*NSEC_PER_MSEC),dispatch_get_main_queue(),^{[self smokeTick];});return;}
         if(ready&&!_smokePrepared){
             PlotOptions startup;startup.mode=Mode::Series;startup.x=findColumn(_data->hdus[_hdu],"ENERGY");
